@@ -8,8 +8,11 @@
 | **Plan height** | 3,198,416 |
 | **Result** | **PASS** (46/46 checks) |
 | **Verified** | 2026-08-05 (live re-query + pre/post packs) |
+| **Explorer** | [testnet.ping.pub/secret](https://testnet.ping.pub/secret) |
 
 **1 uscrt = 0.000001 SCRT** · **1 SCRT = 1,000,000 uscrt**
+
+Account links use: `https://testnet.ping.pub/secret/account/<address>`
 
 ---
 
@@ -35,7 +38,7 @@ Enclave unchanged: sha256 `a1d923c21475c066f94e5388c091f56ff7ea08d25fddfe52c2757
 | Enclave | fleet | same | **PASS** |
 | Blocks | halted | advancing, not catching up | **PASS** |
 
-### Mint (total supply uscrt)
+### Mint (total supply)
 
 | | uscrt | SCRT |
 |--|------:|-----:|
@@ -50,27 +53,50 @@ Extra beyond mint ≈ post-upgrade block provision. **PASS**
 
 ## Buckets (live)
 
-Each row: balance = allocation + **1 SCRT** seed (1,000,000 uscrt), unless noted.
+Balance = allocation + **1 SCRT** seed (1,000,000 uscrt), unless noted. Click address to open explorer.
 
-| Bucket | Type | Balance | Spendable | Original vesting | Vesting detail | Status |
-|--------|------|--------:|----------:|-----------------:|----------------|--------|
-| foundation | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | 29,900,001 SCRT · 29,900,001,000,000 uscrt | 269,100,000 SCRT · 269,100,000,000,000 uscrt | ~60 mo window | **PASS** |
-| core_development | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | 29,900,001 SCRT · 29,900,001,000,000 uscrt | 269,100,000 SCRT · 269,100,000,000,000 uscrt | ~60 mo window | **PASS** |
-| advisors | PeriodicVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | 1 SCRT · 1,000,000 uscrt | 72,000,000 SCRT · 72,000,000,000,000 uscrt | **16** × 4,500,000 SCRT | **PASS** |
-| ecosystem_fund | BaseAccount | 178,000,001 SCRT · 178,000,001,000,000 uscrt | same (all liquid) | — | — | **PASS** |
-| research_development | ContinuousVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | ≥ 7,200,001 SCRT (live ~7,203,065 SCRT) | 64,800,000 SCRT · 64,800,000,000,000 uscrt | ~10% liquid + unlock | **PASS** |
-| builder_relayer_support | BaseAccount | 43,000,001 SCRT · 43,000,001,000,000 uscrt | same (all liquid) | — | — | **PASS** |
-| remediation | ContinuousVesting | 44,000,001 SCRT · 44,000,001,000,000 uscrt | 13,200,001 SCRT · 13,200,001,000,000 uscrt | 30,800,000 SCRT · 30,800,000,000,000 uscrt | 30% liquid | **PASS** |
-| validator_program | PeriodicVesting | 71,040,001 SCRT · 71,040,001,000,000 uscrt | 6,240,001 SCRT · 6,240,001,000,000 uscrt | 64,800,000 SCRT · 64,800,000,000,000 uscrt | **20** × 3,240,000 SCRT; 71.04M = 72M − 4×240k | **PASS** |
+| Bucket | Explorer | Type | Balance | Spendable | Original vesting | Vesting | Status |
+|--------|----------|------|--------:|----------:|-----------------:|---------|--------|
+| foundation | [secret1mce…cryk](https://testnet.ping.pub/secret/account/secret1mcevwvr8n3nkhv35dmwkm7zfqpqyypdn7hcryk) | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | 29,900,001 SCRT · 29,900,001,000,000 uscrt | 269,100,000 SCRT · 269,100,000,000,000 uscrt | ~60 mo | **PASS** |
+| core_development | [secret1p3l…c8w9](https://testnet.ping.pub/secret/account/secret1p3l02sqqddt8n4kg9vs8qeq0hvmx4g6mpdc8w9) | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | 29,900,001 SCRT · 29,900,001,000,000 uscrt | 269,100,000 SCRT · 269,100,000,000,000 uscrt | ~60 mo | **PASS** |
+| advisors | [secret1d3n…d6lvz](https://testnet.ping.pub/secret/account/secret1d3n3cjkpwemav70xt5wtpmpt0nuy0jl2md6lvz) | PeriodicVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | 1 SCRT · 1,000,000 uscrt | 72,000,000 SCRT · 72,000,000,000,000 uscrt | **16** × 4,500,000 SCRT | **PASS** |
+| ecosystem_fund | [secret167e…ed8h](https://testnet.ping.pub/secret/account/secret167ewv0c5cg5k8xwjtmsr8stsxfgxpyc32qed8h) | BaseAccount | 178,000,001 SCRT · 178,000,001,000,000 uscrt | all liquid | — | — | **PASS** |
+| research_development | [secret1dpp…rmxe](https://testnet.ping.pub/secret/account/secret1dpplrnf75kw7sfyv72msq9kua0qycpq55wrmxe) | ContinuousVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | ≥ 7,200,001 SCRT (live ~7,203,065 SCRT) | 64,800,000 SCRT · 64,800,000,000,000 uscrt | ~10% liquid | **PASS** |
+| builder_relayer_support | [secret1j8w…jk6n](https://testnet.ping.pub/secret/account/secret1j8w9qym77v787lec09c7gxn7pvvugrwkjyjk6n) | BaseAccount | 43,000,001 SCRT · 43,000,001,000,000 uscrt | all liquid | — | — | **PASS** |
+| remediation | [secret1q8k…zjp9](https://testnet.ping.pub/secret/account/secret1q8ksklhfjc9rsduy6cw2nl2xfjsuczht4lzjp9) | ContinuousVesting | 44,000,001 SCRT · 44,000,001,000,000 uscrt | 13,200,001 SCRT · 13,200,001,000,000 uscrt | 30,800,000 SCRT · 30,800,000,000,000 uscrt | 30% liquid | **PASS** |
+| validator_program | [secret1kt6…8jr7u](https://testnet.ping.pub/secret/account/secret1kt67upwgqhjgeh6smh4ey9mhgzrtv4wle8jr7u) | PeriodicVesting | 71,040,001 SCRT · 71,040,001,000,000 uscrt | 6,240,001 SCRT · 6,240,001,000,000 uscrt | 64,800,000 SCRT · 64,800,000,000,000 uscrt | **20** × 3,240,000 SCRT; 72M − 4×240k | **PASS** |
+
+### Full addresses (copy / explorer)
+
+| Role | Address | Explorer |
+|------|---------|----------|
+| foundation | `secret1mcevwvr8n3nkhv35dmwkm7zfqpqyypdn7hcryk` | [open](https://testnet.ping.pub/secret/account/secret1mcevwvr8n3nkhv35dmwkm7zfqpqyypdn7hcryk) |
+| core_development | `secret1p3l02sqqddt8n4kg9vs8qeq0hvmx4g6mpdc8w9` | [open](https://testnet.ping.pub/secret/account/secret1p3l02sqqddt8n4kg9vs8qeq0hvmx4g6mpdc8w9) |
+| advisors | `secret1d3n3cjkpwemav70xt5wtpmpt0nuy0jl2md6lvz` | [open](https://testnet.ping.pub/secret/account/secret1d3n3cjkpwemav70xt5wtpmpt0nuy0jl2md6lvz) |
+| ecosystem_fund | `secret167ewv0c5cg5k8xwjtmsr8stsxfgxpyc32qed8h` | [open](https://testnet.ping.pub/secret/account/secret167ewv0c5cg5k8xwjtmsr8stsxfgxpyc32qed8h) |
+| research_development | `secret1dpplrnf75kw7sfyv72msq9kua0qycpq55wrmxe` | [open](https://testnet.ping.pub/secret/account/secret1dpplrnf75kw7sfyv72msq9kua0qycpq55wrmxe) |
+| builder_relayer_support | `secret1j8w9qym77v787lec09c7gxn7pvvugrwkjyjk6n` | [open](https://testnet.ping.pub/secret/account/secret1j8w9qym77v787lec09c7gxn7pvvugrwkjyjk6n) |
+| remediation | `secret1q8ksklhfjc9rsduy6cw2nl2xfjsuczht4lzjp9` | [open](https://testnet.ping.pub/secret/account/secret1q8ksklhfjc9rsduy6cw2nl2xfjsuczht4lzjp9) |
+| validator_program | `secret1kt67upwgqhjgeh6smh4ey9mhgzrtv4wle8jr7u` | [open](https://testnet.ping.pub/secret/account/secret1kt67upwgqhjgeh6smh4ey9mhgzrtv4wle8jr7u) |
 
 ---
 
-## Seats (4 paid)
+## Seats (4 paid · 240,000 SCRT each)
 
-| Seat | Balance | Spendable | Status |
-|------|--------:|----------:|--------|
-| seat01–04 each | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
-| **Total paid** | **960,000 SCRT** · **960,000,000,000 uscrt** | | **PASS** |
+| Seat | Explorer | Balance | Spendable | Status |
+|------|----------|--------:|----------:|--------|
+| seat01 | [secret1qrn…ayr4](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
+| seat02 | [secret1sh5…vyuz](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
+| seat03 | [secret1770…yxmu](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
+| seat04 | [secret19x0…rw5h](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
+| **Total** | | **960,000 SCRT** · **960,000,000,000 uscrt** | | **PASS** |
+
+| Seat | Address | Explorer |
+|------|---------|----------|
+| seat01 | `secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4` | [open](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) |
+| seat02 | `secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz` | [open](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) |
+| seat03 | `secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu` | [open](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) |
+| seat04 | `secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h` | [open](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) |
 
 ---
 
@@ -95,7 +121,13 @@ https://github.com/Secret3dev/SecretNetwork/releases/tag/v1.26.0-community-conti
 | `…_ubuntu-22.04.deb` | `672dd49b5b95587559e998f89e260142a4bcdb958a5f3009ece50e8ff4ce06d4` |
 | `…_ubuntu-24.04.deb` | `d86def55a3c38c7de3dd91583bc66c29e05962e039e0b2ae47939b5f04faf925` |
 
-Install: `scripts/install-testnet.sh` on that release (detects 22.04 / 24.04).  
+```bash
+curl -fsSL -o install.sh \
+  https://raw.githubusercontent.com/Secret3dev/SecretNetwork/v1.26.0-community-continuance/scripts/install-continuance-testnet.sh
+chmod +x install.sh
+sudo ./install.sh
+```
+
 Do not use `--unsafe-skip-upgrades`.
 
 ---
