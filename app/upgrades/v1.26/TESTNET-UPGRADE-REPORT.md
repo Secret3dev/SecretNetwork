@@ -83,20 +83,24 @@ Balance = allocation + **1 SCRT** seed (1,000,000 uscrt), unless noted. Click ad
 
 ## Seats (4 paid · 240,000 SCRT each)
 
-| Seat | Explorer | Balance | Spendable | Status |
-|------|----------|--------:|----------:|--------|
-| seat01 | [secret1qrn…ayr4](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
-| seat02 | [secret1sh5…vyuz](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
-| seat03 | [secret1770…yxmu](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
-| seat04 | [secret19x0…rw5h](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) | 240,000 SCRT · 240,000,000,000 uscrt | same | **PASS** |
-| **Total** | | **960,000 SCRT** · **960,000,000,000 uscrt** | | **PASS** |
+| Slot | Validator (moniker) | Operator | Payout (explorer) | Paid | Status |
+|-----:|---------------------|----------|-------------------|-----:|--------|
+| 1 | **SNF-B** | `secretvaloper17nl6x709q8wta9ja0qu0kduvfc70u8fskhkkve` | [secret1qrn…ayr4](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) | 240,000 SCRT · 240,000,000,000 uscrt | **PASS** |
+| 2 | **SNF-D** | `secretvaloper1fj9zf2l6xlashn3sqcvuj7lythahg3f2v9mx2z` | [secret1sh5…vyuz](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) | 240,000 SCRT · 240,000,000,000 uscrt | **PASS** |
+| 3 | **SNF-A** | `secretvaloper1lgre6vtvntv75z6zvghkpwy4m953u4a7dc8e6e` | [secret1770…yxmu](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) | 240,000 SCRT · 240,000,000,000 uscrt | **PASS** |
+| 4 | **SNF-E** | `secretvaloper1ncfe2lwe0hm4fcjj3ma8nw9xxy95e7dvl4ppyj` | [secret19x0…rw5h](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) | 240,000 SCRT · 240,000,000,000 uscrt | **PASS** |
+| | **Total paid** | | | **960,000 SCRT** · **960,000,000,000 uscrt** | **PASS** |
 
-| Seat | Address | Explorer |
-|------|---------|----------|
-| seat01 | `secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4` | [open](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) |
-| seat02 | `secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz` | [open](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) |
-| seat03 | `secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu` | [open](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) |
-| seat04 | `secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h` | [open](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) |
+**Not seated (no Continuance seat payout):** **SNF-C** · `secretvaloper1pzltl7rn7fyl3grk24m5lsk3kvpeta0tm3k6m5`
+
+**Ghost seats (slots 5–30):** 26 keyless placeholders — expected **SKIPPED** at upgrade (no 240k send). Program retains those reserves (spendable **6,240,001 SCRT** = 26 × 240k + 1 SCRT seed).
+
+| Slot | Moniker | Operator | Payout address | Explorer |
+|-----:|---------|----------|----------------|----------|
+| 1 | SNF-B | `secretvaloper17nl6x709q8wta9ja0qu0kduvfc70u8fskhkkve` | `secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4` | [open](https://testnet.ping.pub/secret/account/secret1qrn9yzzhea8g94r839q2dv8aq9wy6s9g99ayr4) |
+| 2 | SNF-D | `secretvaloper1fj9zf2l6xlashn3sqcvuj7lythahg3f2v9mx2z` | `secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz` | [open](https://testnet.ping.pub/secret/account/secret1sh5zgy007t62upyd4vgegq69qeffqu5uznvyuz) |
+| 3 | SNF-A | `secretvaloper1lgre6vtvntv75z6zvghkpwy4m953u4a7dc8e6e` | `secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu` | [open](https://testnet.ping.pub/secret/account/secret1770dqwlmmnt74588pvj8uqevhx9hjaalngyxmu) |
+| 4 | SNF-E | `secretvaloper1ncfe2lwe0hm4fcjj3ma8nw9xxy95e7dvl4ppyj` | `secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h` | [open](https://testnet.ping.pub/secret/account/secret19x0u83dfynl0sm8evt6l85cg668fttyf7frw5h) |
 
 ---
 
