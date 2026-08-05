@@ -24,7 +24,8 @@ REPO="${REPO:-Secret3dev/SecretNetwork}"
 TAG="${TAG:-v1.26.0-community-continuance}"
 SERVICE="${SERVICE:-secret-node}"
 WORKDIR="${WORKDIR:-/tmp/continuance-install}"
-VERSION="1.26.0"
+# Do NOT name this VERSION — sourcing /etc/os-release overwrites VERSION.
+PKG_VER="${PKG_VER:-1.26.0}"
 
 # Package digests (TESTNET Continuance cut). Must match the Release assets.
 declare -A EXPECT_SHA=(
@@ -50,7 +51,7 @@ case "${VERSION_ID:-}" in
   *) die "unsupported Ubuntu ${VERSION_ID:-unknown} (need 22.04 or 24.04)" ;;
 esac
 
-DEB_NAME="secretnetwork_${VERSION}_TESTNET_goleveldb_amd64_${OS_TAG}.deb"
+DEB_NAME="secretnetwork_${PKG_VER}_TESTNET_goleveldb_amd64_${OS_TAG}.deb"
 WANT_SHA="${EXPECT_SHA[$OS_TAG]}"
 URL="https://github.com/${REPO}/releases/download/${TAG}/${DEB_NAME}"
 
