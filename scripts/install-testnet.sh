@@ -6,12 +6,12 @@
 #
 # Usage (at upgrade halt):
 #   curl -fsSL -o install.sh \
-#     https://raw.githubusercontent.com/Secret3dev/SecretNetwork/v1.26.0-community-continuance/scripts/install-continuance-testnet.sh
+#     https://raw.githubusercontent.com/Secret3dev/SecretNetwork/v1.26.0-community-continuance/scripts/install-testnet.sh
 #   chmod +x install.sh
 #   sudo ./install.sh
 #
 # Or after cloning this repo:
-#   sudo ./scripts/install-continuance-testnet.sh
+#   sudo ./scripts/install-testnet.sh
 #
 # Env (optional):
 #   SERVICE   systemd unit (default: secret-node)
