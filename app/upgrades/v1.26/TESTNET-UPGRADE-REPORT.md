@@ -54,18 +54,19 @@ Extra beyond mint ≈ post-upgrade block provision. **PASS**
 ## Buckets — vesting working on-chain (CLI)
 
 Queried live on pulsar-3 (height ~3,200,067, 2026-08-05). Balance = allocation + **1 SCRT** seed unless noted.  
-**Spendable &lt; total** on vesting buckets = funds are actually locked (explorers may show “0 available” incorrectly).
+**Spendable &lt; total** on vesting buckets = funds are actually locked (explorers may show “0 available” incorrectly).  
+Links: [testnet.ping.pub](https://testnet.ping.pub/secret) — use for navigation; **trust CLI/LCD for available amounts**.
 
-| Bucket | Type | Total | Spendable (liquid now) | Locked | Schedule | Status |
-|--------|------|------:|-----------------------:|-------:|----------|--------|
-| foundation | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | **29,900,001 SCRT** · 29,900,001,000,000 uscrt | **269,100,000 SCRT** · 269,100,000,000,000 uscrt | start **2027-02-05** (cliff) → end 2032-02-05 | **PASS** |
-| core_development | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | **29,900,001 SCRT** · 29,900,001,000,000 uscrt | **269,100,000 SCRT** · 269,100,000,000,000 uscrt | same as foundation | **PASS** |
-| advisors | PeriodicVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | **1 SCRT** · 1,000,000 uscrt (seed only) | **72,000,000 SCRT** · 72,000,000,000,000 uscrt | **16 × 4,500,000 SCRT**; start 2026-08-05 | **PASS** |
-| ecosystem_fund | BaseAccount | 178,000,001 SCRT · 178,000,001,000,000 uscrt | all liquid | 0 | — | **PASS** |
-| research_development | ContinuousVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | ~**7,204,768 SCRT** (unlocking; ≥ 7.2M day-1) | ~64,795,233 SCRT | start 2026-08-05 → end 2031-08-05; orig_vest 64.8M SCRT | **PASS** |
-| builder_relayer_support | BaseAccount | 43,000,001 SCRT · 43,000,001,000,000 uscrt | all liquid | 0 | — | **PASS** |
-| remediation | ContinuousVesting | 44,000,001 SCRT · 44,000,001,000,000 uscrt | **13,200,001 SCRT** · 13,200,001,000,000 uscrt | **30,800,000 SCRT** · 30,800,000,000,000 uscrt | cliff **2027-02-05** → end 2029-02-05 | **PASS** |
-| validator_program | PeriodicVesting | 71,040,001 SCRT · 71,040,001,000,000 uscrt | **6,240,001 SCRT** · 6,240,001,000,000 uscrt | **64,800,000 SCRT** · 64,800,000,000,000 uscrt | **20 × 3,240,000 SCRT**; 72M − 4×240k seats | **PASS** |
+| Bucket | Explorer | Type | Total | Spendable (liquid now) | Locked | Schedule | Status |
+|--------|----------|------|------:|-----------------------:|-------:|----------|--------|
+| foundation | [open](https://testnet.ping.pub/secret/account/secret1mcevwvr8n3nkhv35dmwkm7zfqpqyypdn7hcryk) | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | **29,900,001 SCRT** · 29,900,001,000,000 uscrt | **269,100,000 SCRT** · 269,100,000,000,000 uscrt | start **2027-02-05** (cliff) → end 2032-02-05 | **PASS** |
+| core_development | [open](https://testnet.ping.pub/secret/account/secret1p3l02sqqddt8n4kg9vs8qeq0hvmx4g6mpdc8w9) | ContinuousVesting | 299,000,001 SCRT · 299,000,001,000,000 uscrt | **29,900,001 SCRT** · 29,900,001,000,000 uscrt | **269,100,000 SCRT** · 269,100,000,000,000 uscrt | same as foundation | **PASS** |
+| advisors | [open](https://testnet.ping.pub/secret/account/secret1d3n3cjkpwemav70xt5wtpmpt0nuy0jl2md6lvz) | PeriodicVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | **1 SCRT** · 1,000,000 uscrt (seed only) | **72,000,000 SCRT** · 72,000,000,000,000 uscrt | **16 × 4,500,000 SCRT**; start 2026-08-05 | **PASS** |
+| ecosystem_fund | [open](https://testnet.ping.pub/secret/account/secret167ewv0c5cg5k8xwjtmsr8stsxfgxpyc32qed8h) | BaseAccount | 178,000,001 SCRT · 178,000,001,000,000 uscrt | all liquid | 0 | — | **PASS** |
+| research_development | [open](https://testnet.ping.pub/secret/account/secret1dpplrnf75kw7sfyv72msq9kua0qycpq55wrmxe) | ContinuousVesting | 72,000,001 SCRT · 72,000,001,000,000 uscrt | ~**7,204,768 SCRT** (unlocking; ≥ 7.2M day-1) | ~64,795,233 SCRT | start 2026-08-05 → end 2031-08-05; orig_vest 64.8M SCRT | **PASS** |
+| builder_relayer_support | [open](https://testnet.ping.pub/secret/account/secret1j8w9qym77v787lec09c7gxn7pvvugrwkjyjk6n) | BaseAccount | 43,000,001 SCRT · 43,000,001,000,000 uscrt | all liquid | 0 | — | **PASS** |
+| remediation | [open](https://testnet.ping.pub/secret/account/secret1q8ksklhfjc9rsduy6cw2nl2xfjsuczht4lzjp9) | ContinuousVesting | 44,000,001 SCRT · 44,000,001,000,000 uscrt | **13,200,001 SCRT** · 13,200,001,000,000 uscrt | **30,800,000 SCRT** · 30,800,000,000,000 uscrt | cliff **2027-02-05** → end 2029-02-05 | **PASS** |
+| validator_program | [open](https://testnet.ping.pub/secret/account/secret1kt67upwgqhjgeh6smh4ey9mhgzrtv4wle8jr7u) | PeriodicVesting | 71,040,001 SCRT · 71,040,001,000,000 uscrt | **6,240,001 SCRT** · 6,240,001,000,000 uscrt | **64,800,000 SCRT** · 64,800,000,000,000 uscrt | **20 × 3,240,000 SCRT**; 72M − 4×240k seats | **PASS** |
 
 CLI re-check (29 vesting checks): **29 PASS · 0 FAIL** — vesting accounts working as designed.
 
