@@ -43,6 +43,8 @@ ok() { echo "    OK  $*"; }
 [ -r /etc/os-release ] || die "no /etc/os-release"
 # shellcheck source=/dev/null
 . /etc/os-release
+# os-release defines VERSION= (pretty string). Never use it for package names.
+PKG_VER="1.26.0"
 [ "${ID:-}" = "ubuntu" ] || die "only Ubuntu is supported (got ID=${ID:-unknown})"
 
 case "${VERSION_ID:-}" in
