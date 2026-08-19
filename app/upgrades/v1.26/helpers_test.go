@@ -91,7 +91,9 @@ func filledNetwork(t *testing.T, chainID string) config.Network {
 	}
 	n.Addresses = config.AddressSet{
 		Foundation:            testAddr(0x11),
+		FoundationA:           testAddr(0x12),
 		CoreDevelopment:       testAddr(0x22),
+		CoreDevelopmentA:      testAddr(0x23),
 		Advisors:              testAddr(0x33),
 		EcosystemFund:         testAddr(0x44),
 		ResearchDevelopment:   testAddr(0x55),
@@ -133,17 +135,18 @@ func swapMainnet(n config.Network) func() {
 }
 
 // ---------------------------------------------------------------------------
-// Seeding — custody addresses must exist as BaseAccounts before the upgrade
+// Seeding
 // ---------------------------------------------------------------------------
 
-// seedAddresses credits every custody address with 1 uscrt so a BaseAccount
-// exists. requireSeededBaseAccount refuses unseeded addresses.
+// seedAddresses gives every custody address 1 uscrt, matching the operational
+// rule that every destination must already exist as a BaseAccount.
 func seedAddresses(t *testing.T, a *app.SecretNetworkApp, ctx sdk.Context, n config.Network) {
 	t.Helper()
 	seedAddressesExcept(t, a, ctx, n, "")
 }
 
-// seedAddressesExcept seeds every custody address except the one named.
+// seedAddressesExcept seeds every custody address but the one named, so a test
+// can plant something else there instead.
 func seedAddressesExcept(t *testing.T, a *app.SecretNetworkApp, ctx sdk.Context, n config.Network, skip string) {
 	t.Helper()
 

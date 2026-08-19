@@ -174,17 +174,21 @@ func fundBucket(ctx sdk.Context, k *keepers.SecretAppKeepers, logger log.Logger,
 	total := config.ToUscrt(a.TotalSCRT)
 	locked := a.Locked()
 
-	// The address must ALREADY EXIST as an ordinary BaseAccount. Checked for
-	// every bucket including VestNone, before anything is written. Enforces
-	// the operational seeding rule in code: unseeded or wrong-type addresses
-	// halt rather than creating and funding a new account.
+	// The address must ALREADY EXIST as an ordinary account. Checked for every
+	// bucket including VestNone, and before anything is written.
+	//
+	// Custody destinations must be seeded on chain before the upgrade. An
+	// unseeded address used to be created and funded silently; the handler
+	// now refuses and halts instead.
 	if err := requireSeededBaseAccount(ctx, k.AccountKeeper, addr, "bucket "+a.Name); err != nil {
 		return err
 	}
 
 	switch a.Kind {
 	case config.VestNone:
-		// Fully liquid — no vesting wrapper. Seed check above still applies.
+		// Fully liquid — no vesting wrapper. The pre-existence check above
+		// still applies: this branch previously touched no account at all,
+		// which is why an unseeded VestNone address was funded silently.
 
 	case config.VestContinuous:
 		start, end := config.ContinuousWindow(now, a)
@@ -245,6 +249,14 @@ func executeValidatorProgram(ctx sdk.Context, k *keepers.SecretAppKeepers, logge
 	programAddr, err := sdk.AccAddressFromBech32(vp.ProgramAddress)
 	if err != nil {
 		return fmt.Errorf("program address: %w", err) // unreachable; Validate ran
+	}
+
+	// Program address is custody (the eighth Continuance destination), not a
+	// seat payout. Same seeding rule as fundBucket: must already exist as a
+	// plain BaseAccount. Seat payout addresses below stay exempt — those are
+	// third-party and degrade to vacant rather than halt.
+	if err := requireSeededBaseAccount(ctx, k.AccountKeeper, programAddr, "program address"); err != nil {
+		return err
 	}
 
 	seatAmount := config.ToUscrt(config.ReservedSeatSCRT)
@@ -375,16 +387,17 @@ func seatIneligibleReason(ctx sdk.Context, k *keepers.SecretAppKeepers, seat con
 // Vesting account setup
 // ---------------------------------------------------------------------------
 
-// requireSeededBaseAccount refuses an address that does not already hold a
-// plain BaseAccount. Custody buckets must be pre-seeded; this never creates
-// accounts. Seat payout addresses are not gated here — a bad seat degrades
-// to vacant rather than halting the chain.
+// requireSeededBaseAccount refuses an address that does not already hold an
+// ordinary BaseAccount. Call sites: fundBucket (every allocation) and
+// executeValidatorProgram (program custody address).
+//
+// Not applied to validator seat payout addresses: those are supplied by
+// operators, and a bad one must skip that seat rather than halt the chain.
 func requireSeededBaseAccount(ctx sdk.Context, ak *authkeeper.AccountKeeper, addr sdk.AccAddress, what string) error {
 	acc := ak.GetAccount(ctx, addr)
 	if acc == nil {
 		return fmt.Errorf("%s: address %s has NO ACCOUNT on chain — it was never seeded. "+
-			"Funding it would create a fresh account at an address nobody may hold. "+
-			"Seed every custody address with 1 uscrt and verify it before publication (CHECKLIST T6a / M1s)", what, addr)
+			"Seed every custody address with 1 uscrt and verify it before the upgrade", what, addr)
 	}
 	if _, ok := acc.(*authtypes.BaseAccount); !ok {
 		return fmt.Errorf("%s: address %s already exists with type %T, not a plain BaseAccount; refusing to fund it", what, addr, acc)
@@ -476,13 +489,23 @@ func zeroFoundationTax(ctx sdk.Context, k *keepers.SecretAppKeepers, logger log.
 		return fmt.Errorf("reading distribution params: %w", err)
 	}
 	dp.SecretFoundationTax = sdkmath.LegacyZeroDec()
-	// Safe to clear: this fork's AllocateTokens applies the tax only when the
-	// rate is nonzero AND the address is non-empty, and params validation
-	// accepts an empty address. The community tax is deliberately untouched.
-	dp.SecretFoundationAddress = ""
+	// The ADDRESS IS DELIBERATELY LEFT IN PLACE. Zeroing the rate is sufficient
+	// and is the whole intent: AllocateTokens applies the tax only when the rate
+	// is nonzero AND the address is non-empty (distribution/keeper/allocation.go),
+	// so with a zero rate no tax can flow regardless of what the address holds.
+	//
+	// Clearing it as well looked tidier and permanently broke a public query.
+	// Keeper.FoundationTax re-parses the stored address unconditionally
+	// (distribution/keeper/grpc_query.go) and AccAddressFromBech32("") errors,
+	// so /cosmos/distribution/v1beta1/foundation_tax would return an error
+	// forever — and that route is on the compute stargate allowlist
+	// (x/compute/internal/keeper/query_plugins.go), so contracts can reach it too.
+	//
+	// The community tax is deliberately untouched.
 	if err := k.DistrKeeper.Params.Set(ctx, dp); err != nil {
 		return fmt.Errorf("writing distribution params: %w", err)
 	}
-	logger.Info("secret foundation tax set to 0 and foundation address cleared")
+	logger.Info("secret foundation tax set to 0; foundation address deliberately preserved (R3)",
+		"address", dp.SecretFoundationAddress)
 	return nil
 }

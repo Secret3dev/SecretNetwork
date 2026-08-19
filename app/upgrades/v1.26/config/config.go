@@ -28,7 +28,7 @@ import (
 var moduleAccountNames = []string{
 	"fee_collector", "distribution", "mint", "bonded_tokens_pool",
 	"not_bonded_tokens_pool", "gov", "transfer", "interchainaccounts",
-	"feeibc", "ibc-switch", "compute", "cron",
+	"feeibc", "ibc-switch", "emergencybutton", "compute", "cron",
 }
 
 // isModuleAddress reports whether addr is one of the chain's module accounts.
@@ -187,12 +187,16 @@ func (v ValidatorProgram) VestingSCRT() int64 {
 // Networks
 // ---------------------------------------------------------------------------
 
-// AddressSet is the per-network custody address list. This is the ONLY thing
-// that differs between the mainnet and testnet builds — the economics below
-// are shared, so the two networks cannot drift apart.
+// AddressSet is the per-network custody address list.
+//
+// FoundationA and CoreDevelopmentA are secret-4 destinations only. Other
+// networks leave them empty; Allocations() does not emit those rows except
+// on secret-4.
 type AddressSet struct {
 	Foundation            string
+	FoundationA           string
 	CoreDevelopment       string
+	CoreDevelopmentA      string
 	Advisors              string
 	EcosystemFund         string
 	ResearchDevelopment   string
@@ -224,8 +228,73 @@ type Network struct {
 //	Remediation           44M — 30% liquid; 70% linear 2y after a 6-month cliff
 //
 // The Validator Program's 72M is handled separately (see ValidatorProgram).
+//
+// On secret-4 only, foundation and core_development are two destinations
+// each (foundation + foundation_a, core_development + core_development_a).
+// Same vest shape; family totals still 299M + 299M. Pulsar and LocalSecret
+// keep the original eight-bucket table.
 func (n Network) Allocations() []Allocation {
 	a := n.Addresses
+	if n.ChainID == "secret-4" {
+		return []Allocation{
+			{
+				Name: "foundation", Address: a.Foundation,
+				TotalSCRT: 262_975_000, LiquidPct: 10,
+				Kind: VestContinuous, CliffMonths: 6, DurationMonths: 60,
+			},
+			{
+				Name: "foundation_a", Address: a.FoundationA,
+				TotalSCRT: 36_025_000, LiquidPct: 10,
+				Kind: VestContinuous, CliffMonths: 6, DurationMonths: 60,
+			},
+			{
+				// v23: "The Foundation holds this allocation and pays the core
+				// development entity quarterly for services." Held at a separate
+				// Foundation-controlled address so the two tranches stay
+				// separately auditable for the published payout reports.
+				Name: "core_development", Address: a.CoreDevelopment,
+				TotalSCRT: 262_975_000, LiquidPct: 10,
+				Kind: VestContinuous, CliffMonths: 6, DurationMonths: 60,
+			},
+			{
+				Name: "core_development_a", Address: a.CoreDevelopmentA,
+				TotalSCRT: 36_025_000, LiquidPct: 10,
+				Kind: VestContinuous, CliffMonths: 6, DurationMonths: 60,
+			},
+			{
+				// v24: "a 6-month cliff, then equal quarterly unlocks over the
+				// following 4 years" — 16 unlocks of 4,500,000 SCRT at months
+				// 9, 12, … 54. (v23 said 5 years / 20 unlocks of 3.6M.)
+				Name: "advisors", Address: a.Advisors,
+				TotalSCRT: 72_000_000, LiquidPct: 0,
+				Kind: VestPeriodicQuarterly, CliffMonths: 6, DurationMonths: 48,
+				FirstUnlockAtCliffEnd: false,
+			},
+			{
+				Name: "ecosystem_fund", Address: a.EcosystemFund,
+				TotalSCRT: 178_000_000, LiquidPct: 100,
+				Kind: VestNone,
+			},
+			{
+				Name: "research_development", Address: a.ResearchDevelopment,
+				TotalSCRT: 72_000_000, LiquidPct: 10,
+				Kind: VestContinuous, CliffMonths: 0, DurationMonths: 60,
+			},
+			{
+				// v24 moved this to the unshaded rows: "Existing Holders, Ecosystem
+				// Fund, Builder & Relayer Support: no vesting or lockup."
+				// (v23 had it at 10% liquid with 90% vesting linearly over 5y.)
+				Name: "builder_relayer_support", Address: a.BuilderRelayerSupport,
+				TotalSCRT: 43_000_000, LiquidPct: 100,
+				Kind: VestNone,
+			},
+			{
+				Name: "remediation", Address: a.Remediation,
+				TotalSCRT: 44_000_000, LiquidPct: 30,
+				Kind: VestContinuous, CliffMonths: 6, DurationMonths: 24,
+			},
+		}
+	}
 	return []Allocation{
 		{
 			Name: "foundation", Address: a.Foundation,
@@ -291,32 +360,49 @@ func openSeats() []ValidatorSeat { return make([]ValidatorSeat, ValidatorSeatCou
 
 // Mainnet is the secret-4 build.
 //
-// Addresses stay FillMe until testnet is user-confirmed GREEN — that gate is
-// deliberate, see plan-staging/mainnet/CHECKLIST.md.
-//
-// EVERY address must be seeded with 1 uscrt at key-generation time, BEFORE it
-// is written here or shared with anyone (CHECKLIST M1s).
+// Bucket addresses: operator handoff, recorded 2026-08-05, re-verified
+// live on this host 2026-08-19 (local LCD): all 10 are BaseAccount + seed.
+// Seats: 12 real operator-supplied payouts, slots 13–30 vacant (no ghosts).
+// Solva (slot 10) is currently UNBONDED+jailed and will SKIP unless active at
+// height — that is intentional; the 240k stays at the program address.
 var Mainnet = Network{
 	Name:    "mainnet",
 	ChainID: "secret-4",
 	Addresses: AddressSet{
-		Foundation:            FillMe,
-		CoreDevelopment:       FillMe,
-		Advisors:              FillMe,
-		EcosystemFund:         FillMe,
-		ResearchDevelopment:   FillMe,
-		BuilderRelayerSupport: FillMe,
-		Remediation:           FillMe,
-		ValidatorProgram:      FillMe,
+		Foundation:            "secret1ryckl94ut57pu6qcncvmrtp7clu5e4nsuqmpuk",
+		FoundationA:           "secret1508hr88eunka33yf3x5628uwmt5t8a3qcy4h0r",
+		CoreDevelopment:       "secret1qse8372wvrrsytuexyejzgxvhc7k7tjxppxkjq",
+		CoreDevelopmentA:      "secret1a68ex7zrxchc27arpfsvff3rlcxwkvw02n7nrd",
+		Advisors:              "secret1vgt32rzdcxpe6258k5jw0ft49mzlmyx4qxmugg",
+		EcosystemFund:         "secret1wjq9kepjhhpnz9eyzpczwx6xfwx468g9ydxja0",
+		ResearchDevelopment:   "secret1uetf79ry5qa0kmlkc9wwrt50p0tsn9pujj6xgw",
+		BuilderRelayerSupport: "secret1u8wahe7ypew5fd5culg4dx6rzgy8jv8904dktg",
+		Remediation:           "secret1syrfdjp7rkft8r5v2vpxch9x3h3ypvzp9nujjc",
+		ValidatorProgram:      "secret1vaxqlz3annvlmae57dxk07dvzk3myew9c4qayl",
 	},
-	Seats: openSeats(),
+	Seats: func() []ValidatorSeat {
+		s := openSeats()
+		s[0] = ValidatorSeat{Operator: "secretvaloper1dyfats3mqaphz7wyj8r89lt3gze88eenwu7tmf", Address: "secret133ezxteaes7hjhcze04g0mj98saee6sc2wa56l"}  // PathrockNetwork
+		s[1] = ValidatorSeat{Operator: "secretvaloper18acdn4vaxfkqj0ta25u3ulzdyzekrqe5w9q2n4", Address: "secret18xp86qg5443s0ua8zu9s55ye854v9t6vjrrcyd"}  // cowlevel
+		s[2] = ValidatorSeat{Operator: "secretvaloper16p9uqwcq2gvz75y5p9zvhn7vek9ra9zfunwyf0", Address: "secret1jvdkkv78d2gmzgt8jxe2n8v6zp6wkw3wcje7rj"}  // mario
+		s[3] = ValidatorSeat{Operator: "secretvaloper1yv9f4tankaktdtf8lq6rjsx9c9rpfptc7kzhz2", Address: "secret1agnnnt2n2yxftesj5tnp30kt4xy6v8qz4s9fwc"}  // starshell
+		s[4] = ValidatorSeat{Operator: "secretvaloper1q0rth4fu4svxnw63vjd7w74nadzsdp0fmkhj3d", Address: "secret12jtkjs64a7uef0fejkqwu04dht09lq5vrfazj8"}  // secretsaturn
+		s[5] = ValidatorSeat{Operator: "secretvaloper1glyaxntl2jm3sruafq4rhxfrq4vzrgz0mg9m90", Address: "secret1y27x7nthdavc7zcrhj24he338q4tned7xyx3tt"}  // zonescan
+		s[6] = ValidatorSeat{Operator: "secretvaloper1hjd20hjvkx06y8p42xl0uzr3gr3ue3nkvd79jj", Address: "secret1p4gsj79a3dnyysmqssjntuhvzzvkx2fld0rs35"}  // secretnodes.com
+		s[7] = ValidatorSeat{Operator: "secretvaloper1j86vq5v9fg00uyptq6ufhxctqq6rkraeqh90dk", Address: "secret1zsfqyss7vnxc4xgle8vgf0apz2ful0mn34qdq5"}  // NodesHub
+		s[8] = ValidatorSeat{Operator: "secretvaloper1dv7dv52pl6cf6jlty2y6dsc5fdk682wwfaljms", Address: "secret1e069qa6grmlqt97fm5ex45m90knf2384txc9pa"}  // pro-nodes75
+		s[9] = ValidatorSeat{Operator: "secretvaloper1tums792cvpugaydvqgl7t6r5khfsgh7n78hs5w", Address: "secret1t3qdrxhuxmcavkdx5jx5eklj6snwpwtvkg87nw"}  // Solva (prev. CryptoCrew) — SKIP if still inactive at height
+		s[10] = ValidatorSeat{Operator: "secretvaloper1sa8av4qw3xerr58kwvnm8wvd87zgp36mv6cnyg", Address: "secret1c450yxdt0qw98zkkxfsw9tulm308ycun7pw6hx"} // Consensus One
+		s[11] = ValidatorSeat{Operator: "secretvaloper1nnt3t7ms82vf86jwq88zvwvzvm2mkhxx67zl3z", Address: "secret1y60wxxdt9fd6w36j3dn6h25lvvknvkjae2p9wf"} // Mr Roboto
+		return s
+	}(),
 }
 
 // Pulsar is the testnet build. Its upgrade name differs from mainnet's on
 // purpose: a binary built for one network cannot answer the other's plan.
 //
-// Fill these with THROWAWAY keys — seeded with 1 uscrt at generation time,
-// before being written here (CHECKLIST T6a).
+// Fill these with throwaway keys — seeded with 1 uscrt at generation time,
+// before being written here.
 var Pulsar = Network{
 	Name:    "testnet",
 	ChainID: "pulsar-3",
@@ -342,26 +428,26 @@ var Pulsar = Network{
 		s[7] = ValidatorSeat{Operator: "secretvaloper1xd5fseql7ztz9ua9vkrwwxjsevgdeecvfuakqm", Address: "secret178289rxvsyjqqm5832n7kmzyn4kaqzskf2r5eg"}  // ghost-08
 		s[8] = ValidatorSeat{Operator: "secretvaloper16vgd2tnxat6w93dqps56d2psu6ykr8fa553ue8", Address: "secret10aspggnyhu8hfq99n37nja6u27yarqrkte20vp"}  // ghost-09
 		s[9] = ValidatorSeat{Operator: "secretvaloper1x0uugkqpsun8f9x4dhxyvyulmfzyzh8gxhfrv4", Address: "secret1yqtvp62rm8suxq7u92y7u4xnt7yehs3c5zr5lc"}  // ghost-10
-		s[10] = ValidatorSeat{Operator: "secretvaloper1kul5rvx9x7q4zpf3gxx8t0x9fg5d2ea36nt7zp", Address: "secret1dt9t0tqqdpm47fjtjn34phf58vg3ew6tgugehu"}  // ghost-11
-		s[11] = ValidatorSeat{Operator: "secretvaloper1fyaerpht0qxjkeflhn3ue9su2vzs3t9tr68zsk", Address: "secret1syg4cdyq9xtrkyvepumqn6ruqghm4w72vrnqxe"}  // ghost-12
-		s[12] = ValidatorSeat{Operator: "secretvaloper16gwg30ez4yuau8nj54fzxser6vtapqt0zw870u", Address: "secret1h065msw39lam8zzpcpu4hufkqgaqkn93rxvusx"}  // ghost-13
-		s[13] = ValidatorSeat{Operator: "secretvaloper1ue7chn086qr2zp2dfyxw5xrcfyh6fll42h0ghq", Address: "secret185d23970ttwr2r98a46cy0vx0numteg44gkgax"}  // ghost-14
-		s[14] = ValidatorSeat{Operator: "secretvaloper1evt8jwp3n862eme8svssp5r9549de9teu5uke5", Address: "secret16ys07rfcf4ntymz7wjams6phlu3a9kpa88n0yk"}  // ghost-15
-		s[15] = ValidatorSeat{Operator: "secretvaloper10u8uug4p2e9hqsdg3dezlq2x3vg8da9u28g9am", Address: "secret1mx7p80e083n68gvj57ruaewnwah5xcx87qgxae"}  // ghost-16
-		s[16] = ValidatorSeat{Operator: "secretvaloper12ggcteulc3jcm0mrat9php4cr2cn2t2zv43dqw", Address: "secret12namkf2mw05r0u9x27498gfwm59h99h964wkxd"}  // ghost-17
-		s[17] = ValidatorSeat{Operator: "secretvaloper190lq8cvw78tasmshgfygzha4s7gneg65w34klz", Address: "secret15dwx5gfgk9lfpym7udkprnsfr9cuh9t2nwawcp"}  // ghost-18
-		s[18] = ValidatorSeat{Operator: "secretvaloper17tsmp92qa0vnmmguxgyt8ts56fxlucu8qgvgez", Address: "secret17tjs40v0klummefu8v3e4esdvzfz2nvmy3cx3w"}  // ghost-19
-		s[19] = ValidatorSeat{Operator: "secretvaloper1m5un9r6nnd8tfmanx8yzkc8vwpkqrut7uyyc3f", Address: "secret1h0ek4drx0ekr4ymjrnmnphrfc7fhwm2ksts8xw"}  // ghost-20
-		s[20] = ValidatorSeat{Operator: "secretvaloper1k89wdls25qgh26fdtvgamx50cy8lynxdqtc3yx", Address: "secret1scp795p8k68x97het0zd7jhffzcq0cec73ga8j"}  // ghost-21
-		s[21] = ValidatorSeat{Operator: "secretvaloper10x8rev7ee749za6vjsrv25akuxajuvx9gc82c2", Address: "secret1kh27zj3z9jp8ln2w3w325xz47c89erkl929kll"}  // ghost-22
-		s[22] = ValidatorSeat{Operator: "secretvaloper18wrctgyeetpgsqcq63qdjuqrle3v08fnpfz0fx", Address: "secret1aw7cenqpct3f4hdtty9r44csjqrgrxzk05w7lk"}  // ghost-23
-		s[23] = ValidatorSeat{Operator: "secretvaloper1v20xdnz25n9r0lzzndchxn6327lggd86y9zlhu", Address: "secret1g05kzj4lsykq2xapfdng8h300d82at3qhgjz5t"}  // ghost-24
-		s[24] = ValidatorSeat{Operator: "secretvaloper10zxu8alkrv64vsyvudpmcg8jpg5e8pn09wx2qu", Address: "secret1rekcztmuzms7cg9haew8tkpp3tz963pv0q9ez8"}  // ghost-25
-		s[25] = ValidatorSeat{Operator: "secretvaloper1p9g9p7hvhg43u3x2mmmerwx6mqnvemkx2jtz8l", Address: "secret12q440gn26ahf93wp9rcnluh2ppdsf8cy4fqv0s"}  // ghost-26
-		s[26] = ValidatorSeat{Operator: "secretvaloper1z4extxzucn7vv05g8jmntagv4wxklm2vjpys2e", Address: "secret1t8rwfysdwuervjk48p0lze8a54gyyktlynllve"}  // ghost-27
-		s[27] = ValidatorSeat{Operator: "secretvaloper1gdp2t79q06nwl0r3xx289kwc8yc0rr5jl0zvv7", Address: "secret1avkyh7zh3a9q08k73wczd6cqp3suevxtj7q6gs"}  // ghost-28
-		s[28] = ValidatorSeat{Operator: "secretvaloper1uyy0mnn8q7thdwftg3mu42nyz7qzsdxtputtm4", Address: "secret1dhz7re83zpmdy6j3f0mk9h2cmgers8x8mhjvnv"}  // ghost-29
-		s[29] = ValidatorSeat{Operator: "secretvaloper14573upqndeqrqk3q8kp3la709qtzsah88xfzv0", Address: "secret1zjntucf7w36qqhgktl9njsghvrvlnhe8deayqu"}  // ghost-30
+		s[10] = ValidatorSeat{Operator: "secretvaloper1kul5rvx9x7q4zpf3gxx8t0x9fg5d2ea36nt7zp", Address: "secret1dt9t0tqqdpm47fjtjn34phf58vg3ew6tgugehu"} // ghost-11
+		s[11] = ValidatorSeat{Operator: "secretvaloper1fyaerpht0qxjkeflhn3ue9su2vzs3t9tr68zsk", Address: "secret1syg4cdyq9xtrkyvepumqn6ruqghm4w72vrnqxe"} // ghost-12
+		s[12] = ValidatorSeat{Operator: "secretvaloper16gwg30ez4yuau8nj54fzxser6vtapqt0zw870u", Address: "secret1h065msw39lam8zzpcpu4hufkqgaqkn93rxvusx"} // ghost-13
+		s[13] = ValidatorSeat{Operator: "secretvaloper1ue7chn086qr2zp2dfyxw5xrcfyh6fll42h0ghq", Address: "secret185d23970ttwr2r98a46cy0vx0numteg44gkgax"} // ghost-14
+		s[14] = ValidatorSeat{Operator: "secretvaloper1evt8jwp3n862eme8svssp5r9549de9teu5uke5", Address: "secret16ys07rfcf4ntymz7wjams6phlu3a9kpa88n0yk"} // ghost-15
+		s[15] = ValidatorSeat{Operator: "secretvaloper10u8uug4p2e9hqsdg3dezlq2x3vg8da9u28g9am", Address: "secret1mx7p80e083n68gvj57ruaewnwah5xcx87qgxae"} // ghost-16
+		s[16] = ValidatorSeat{Operator: "secretvaloper12ggcteulc3jcm0mrat9php4cr2cn2t2zv43dqw", Address: "secret12namkf2mw05r0u9x27498gfwm59h99h964wkxd"} // ghost-17
+		s[17] = ValidatorSeat{Operator: "secretvaloper190lq8cvw78tasmshgfygzha4s7gneg65w34klz", Address: "secret15dwx5gfgk9lfpym7udkprnsfr9cuh9t2nwawcp"} // ghost-18
+		s[18] = ValidatorSeat{Operator: "secretvaloper17tsmp92qa0vnmmguxgyt8ts56fxlucu8qgvgez", Address: "secret17tjs40v0klummefu8v3e4esdvzfz2nvmy3cx3w"} // ghost-19
+		s[19] = ValidatorSeat{Operator: "secretvaloper1m5un9r6nnd8tfmanx8yzkc8vwpkqrut7uyyc3f", Address: "secret1h0ek4drx0ekr4ymjrnmnphrfc7fhwm2ksts8xw"} // ghost-20
+		s[20] = ValidatorSeat{Operator: "secretvaloper1k89wdls25qgh26fdtvgamx50cy8lynxdqtc3yx", Address: "secret1scp795p8k68x97het0zd7jhffzcq0cec73ga8j"} // ghost-21
+		s[21] = ValidatorSeat{Operator: "secretvaloper10x8rev7ee749za6vjsrv25akuxajuvx9gc82c2", Address: "secret1kh27zj3z9jp8ln2w3w325xz47c89erkl929kll"} // ghost-22
+		s[22] = ValidatorSeat{Operator: "secretvaloper18wrctgyeetpgsqcq63qdjuqrle3v08fnpfz0fx", Address: "secret1aw7cenqpct3f4hdtty9r44csjqrgrxzk05w7lk"} // ghost-23
+		s[23] = ValidatorSeat{Operator: "secretvaloper1v20xdnz25n9r0lzzndchxn6327lggd86y9zlhu", Address: "secret1g05kzj4lsykq2xapfdng8h300d82at3qhgjz5t"} // ghost-24
+		s[24] = ValidatorSeat{Operator: "secretvaloper10zxu8alkrv64vsyvudpmcg8jpg5e8pn09wx2qu", Address: "secret1rekcztmuzms7cg9haew8tkpp3tz963pv0q9ez8"} // ghost-25
+		s[25] = ValidatorSeat{Operator: "secretvaloper1p9g9p7hvhg43u3x2mmmerwx6mqnvemkx2jtz8l", Address: "secret12q440gn26ahf93wp9rcnluh2ppdsf8cy4fqv0s"} // ghost-26
+		s[26] = ValidatorSeat{Operator: "secretvaloper1z4extxzucn7vv05g8jmntagv4wxklm2vjpys2e", Address: "secret1t8rwfysdwuervjk48p0lze8a54gyyktlynllve"} // ghost-27
+		s[27] = ValidatorSeat{Operator: "secretvaloper1gdp2t79q06nwl0r3xx289kwc8yc0rr5jl0zvv7", Address: "secret1avkyh7zh3a9q08k73wczd6cqp3suevxtj7q6gs"} // ghost-28
+		s[28] = ValidatorSeat{Operator: "secretvaloper1uyy0mnn8q7thdwftg3mu42nyz7qzsdxtputtm4", Address: "secret1dhz7re83zpmdy6j3f0mk9h2cmgers8x8mhjvnv"} // ghost-29
+		s[29] = ValidatorSeat{Operator: "secretvaloper14573upqndeqrqk3q8kp3la709qtzsah88xfzv0", Address: "secret1zjntucf7w36qqhgktl9njsghvrvlnhe8deayqu"} // ghost-30
 		return s
 	}(),
 }

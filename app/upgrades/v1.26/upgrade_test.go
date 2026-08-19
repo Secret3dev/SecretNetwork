@@ -12,13 +12,14 @@
 //
 //	go test -count 1 -tags secretcli ./app/upgrades/v1.26/ -v
 //
-// Pattern: ScheduleUpgrade at H-1, advance to H, call PreBlock, assert.
+// Arrange state, ScheduleUpgrade at H-1, advance to H, call PreBlock, assert.
 //
 // This lives in an EXTERNAL test package (v1_26_test) because `app` imports
 // this package — an internal test would be an import cycle.
 package v1_26_test
 
 import (
+	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	"os"
 	"strings"
 	"testing"
@@ -264,7 +265,12 @@ func TestUpgradeRefusesUnknownChain(t *testing.T) {
 // TestUpgradeRefusesPlaceholders proves fail-closed on our own misconfiguration
 // through the real path, not by re-running Validate in isolation.
 func TestUpgradeRefusesPlaceholders(t *testing.T) {
-	a, ctx := newTestApp(t, "secret-4") // shipped Mainnet still has FillMe
+	n := filledNetwork(t, "secret-4")
+	n.Addresses.Foundation = config.FillMe
+	restore := swapMainnet(n)
+	defer restore()
+
+	a, ctx := newTestApp(t, "secret-4")
 	supplyBefore := a.AppKeepers.BankKeeper.GetSupply(ctx, config.BondDenom).Amount
 
 	err := runUpgrade(t, a, ctx)
@@ -276,9 +282,8 @@ func TestUpgradeRefusesPlaceholders(t *testing.T) {
 	}
 }
 
-// TestNonBaseAccountAtBucketHaltsUpgrade: every bucket address must already be
-// a plain BaseAccount. A vesting (or other) account type at that address must
-// fail closed before any mint is applied.
+// TestNonBaseAccountAtBucketHaltsUpgrade: a vesting account at a bucket
+// address must halt. Custody destinations must be ordinary BaseAccounts.
 func TestNonBaseAccountAtBucketHaltsUpgrade(t *testing.T) {
 	n := filledNetwork(t, "secret-4")
 	restore := swapMainnet(n)
@@ -286,13 +291,15 @@ func TestNonBaseAccountAtBucketHaltsUpgrade(t *testing.T) {
 
 	a, ctx := newTestApp(t, "secret-4")
 
+	// Plant a vesting account at the foundation address instead of seeding it.
 	victim := sdk.MustAccAddressFromBech32(n.Addresses.Foundation)
+	// Allocate a real account number, exactly as MsgCreateVestingAccount would.
 	fresh := a.AppKeepers.AccountKeeper.NewAccountWithAddress(ctx, victim)
 	base, ok := fresh.(*authtypes.BaseAccount)
 	if !ok {
 		t.Fatalf("expected a BaseAccount, got %T", fresh)
 	}
-	wrongType, err := vestingtypes.NewContinuousVestingAccount(
+	planted, err := vestingtypes.NewContinuousVestingAccount(
 		base,
 		sdk.NewCoins(sdk.NewCoin(config.BondDenom, sdkmath.OneInt())),
 		ctx.BlockTime().Unix(),
@@ -301,17 +308,18 @@ func TestNonBaseAccountAtBucketHaltsUpgrade(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	a.AppKeepers.AccountKeeper.SetAccount(ctx, wrongType)
+	a.AppKeepers.AccountKeeper.SetAccount(ctx, planted)
 
+	// Seed the rest normally, so this isolates the planted address.
 	seedAddressesExcept(t, a, ctx, n, n.Addresses.Foundation)
 
 	if err := runUpgrade(t, a, ctx); err == nil {
-		t.Fatal("expected non-BaseAccount at bucket address to halt the upgrade")
+		t.Fatal("expected a non-BaseAccount at a bucket address to halt the upgrade")
 	}
 }
 
 // TestSeededBaseAccountsUpgradeCleanly: with every custody address pre-seeded
-// as a BaseAccount (operational requirement), the upgrade succeeds.
+// as a BaseAccount, the upgrade succeeds.
 func TestSeededBaseAccountsUpgradeCleanly(t *testing.T) {
 	n := filledNetwork(t, "secret-4")
 	restore := swapMainnet(n)
@@ -333,32 +341,191 @@ func TestUnseededBucketHaltsUpgrade(t *testing.T) {
 	defer restore()
 
 	a, ctx := newTestApp(t, "secret-4")
+	// Seed everything EXCEPT foundation — i.e. we forgot one.
 	seedAddressesExcept(t, a, ctx, n, n.Addresses.Foundation)
 
 	err := runUpgrade(t, a, ctx)
 	if err == nil {
-		t.Fatal("an UNSEEDED bucket address must halt the upgrade")
+		t.Fatal("an UNSEEDED bucket address must halt the upgrade, not be silently created and funded")
 	}
 	if !strings.Contains(err.Error(), "NO ACCOUNT") {
 		t.Fatalf("expected the unseeded-address error, got: %v", err)
 	}
 }
 
-// TestUnseededLiquidBucketHaltsUpgrade: same rule for VestNone buckets (the
-// send path would otherwise create the recipient account).
+// TestUnseededLiquidBucketHaltsUpgrade covers the VestNone path specifically.
+// It is a separate test because that branch used to touch no account at all —
+// it went straight to the send, which auto-creates the recipient. So it was
+// silent even by the standards of the bug above, and a guard placed only inside
+// ensureBaseAccount would not have caught it.
 func TestUnseededLiquidBucketHaltsUpgrade(t *testing.T) {
 	n := filledNetwork(t, "secret-4")
 	restore := swapMainnet(n)
 	defer restore()
 
 	a, ctx := newTestApp(t, "secret-4")
+	// ecosystem_fund is VestNone and the largest fully liquid bucket (178M).
 	seedAddressesExcept(t, a, ctx, n, n.Addresses.EcosystemFund)
 
 	err := runUpgrade(t, a, ctx)
 	if err == nil {
-		t.Fatal("an unseeded VestNone bucket must halt the upgrade")
+		t.Fatal("an unseeded VestNone bucket must halt the upgrade — this branch creates the account via the bank send, so it was the most silent path of all")
 	}
 	if !strings.Contains(err.Error(), "NO ACCOUNT") {
 		t.Fatalf("expected the unseeded-address error, got: %v", err)
 	}
+}
+
+// TestUnseededProgramAddressHaltsUpgrade is the third member of the unseeded
+// custody family. The program address is not in Allocations() / fundBucket; it
+// is funded only via executeValidatorProgram → setPeriodicVesting →
+// ensureBaseAccount. Without requireSeededBaseAccount there, an unseeded
+// program wallet was created and funded (up to 72M SCRT) with err=nil.
+// Seat payout addresses stay exempt — see TestSeatPaidToAddressThatNeverExisted.
+func TestUnseededProgramAddressHaltsUpgrade(t *testing.T) {
+	n := filledNetwork(t, "secret-4")
+	restore := swapMainnet(n)
+	defer restore()
+
+	a, ctx := newTestApp(t, "secret-4")
+	seedAddressesExcept(t, a, ctx, n, n.Addresses.ValidatorProgram)
+
+	err := runUpgrade(t, a, ctx)
+	if err == nil {
+		t.Fatal("an UNSEEDED validator program address must halt the upgrade, not be silently created and funded with up to 72,000,000 SCRT")
+	}
+	if !strings.Contains(err.Error(), "NO ACCOUNT") {
+		t.Fatalf("expected the unseeded-address error, got: %v", err)
+	}
+}
+
+// TestModuleAccountScreenIsComplete ensures config.moduleAccountNames has not
+// drifted behind app.ModuleAccountPermissions. A module present in the app but
+// missing from the screen would pass Validate when pasted as a custody address.
+func TestModuleAccountScreenIsComplete(t *testing.T) {
+	for name := range app.ModuleAccountPermissions {
+		name := name
+		t.Run(name, func(t *testing.T) {
+			modAddr := authtypes.NewModuleAddress(name).String()
+			n := filledNetwork(t, "secret-4")
+			n.Addresses.Foundation = modAddr
+			if err := config.Validate(n); err == nil {
+				t.Fatalf("Validate accepted app module %q as foundation — moduleAccountNames is incomplete vs app.ModuleAccountPermissions", name)
+			}
+		})
+	}
+}
+
+// TestFoundationTaxZeroedButAddressPreserved locks in R3.
+//
+// Zeroing the RATE is the whole intent and is sufficient: AllocateTokens applies
+// the tax only when the rate is nonzero AND the address is non-empty, so no tax
+// can flow with a zero rate.
+//
+// Clearing the address as well looked tidier and permanently broke a public
+// query — Keeper.FoundationTax re-parses the stored address unconditionally and
+// AccAddressFromBech32("") errors, so /cosmos/distribution/v1beta1/foundation_tax
+// would return an error forever. That route is on the compute stargate
+// allowlist, so contracts can reach it too.
+//
+// If this test starts failing because someone re-added the clear, read the above
+// before "fixing" it.
+func TestFoundationTaxZeroedButAddressPreserved(t *testing.T) {
+	n := filledNetwork(t, "secret-4")
+	restore := swapMainnet(n)
+	defer restore()
+
+	a, ctx := newTestApp(t, "secret-4")
+	seedAddresses(t, a, ctx, n)
+
+	// Give the chain a non-zero tax AND a real address, so both halves are
+	// observable rather than vacuous.
+	before, err := a.AppKeepers.DistrKeeper.Params.Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before.SecretFoundationTax = sdkmath.LegacyMustNewDecFromStr("0.05")
+	before.SecretFoundationAddress = n.Addresses.Foundation
+	if err := a.AppKeepers.DistrKeeper.Params.Set(ctx, before); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runUpgrade(t, a, ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := a.AppKeepers.DistrKeeper.Params.Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.SecretFoundationTax.IsZero() {
+		t.Fatalf("foundation tax should be zero, got %s", after.SecretFoundationTax)
+	}
+	if after.SecretFoundationAddress == "" {
+		t.Fatal("foundation ADDRESS was cleared — this permanently breaks the " +
+			"FoundationTax query (contract-reachable via the stargate allowlist). " +
+			"Zeroing the rate alone already stops all tax flow.")
+	}
+	if after.SecretFoundationAddress != n.Addresses.Foundation {
+		t.Fatalf("foundation address changed unexpectedly: %s", after.SecretFoundationAddress)
+	}
+}
+
+// TestSeatPaidToAddressThatNeverExisted covers the one path nothing else did.
+//
+// Seat payout addresses are supplied by validators. We cannot seed them — they
+// are not ours — so unlike the eight buckets they are deliberately exempt from
+// requireSeededBaseAccount, and the bank send creates the account on the way in
+// (x/bank/keeper/send.go). That is correct and intended.
+//
+// But it had never been EXECUTED. The LocalSecret rehearsal seeds its seat
+// payouts in genesis, so its paid seat landed at 240,000 + the 1 SCRT seed and
+// the account pre-existed. No unit test filled a seat at all. So "the account is
+// created on payment" was verified by reading the SDK, never by running it.
+//
+// This asserts the whole claim: the address does not exist beforehand, and
+// afterwards it holds EXACTLY the seat amount — no seed term — as an ordinary
+// BaseAccount the validator can spend from.
+func TestSeatPaidToAddressThatNeverExisted(t *testing.T) {
+	n := filledNetwork(t, "secret-4")
+
+	restore := swapMainnet(n)
+	defer restore()
+	a, ctx := newTestApp(t, "secret-4")
+
+	all, err := a.AppKeepers.StakingKeeper.GetAllValidators(ctx)
+	if err != nil || len(all) == 0 {
+		t.Skip("no validators in state")
+	}
+	op := all[0].OperatorAddress
+
+	// A payout address that has never existed on chain.
+	payout := sdk.AccAddress(secp256k1.GenPrivKey().PubKey().Address().Bytes())
+	if a.AppKeepers.AccountKeeper.GetAccount(ctx, payout) != nil {
+		t.Fatal("test premise broken: the payout address already exists")
+	}
+
+	n.Seats[0] = config.ValidatorSeat{Operator: op, Address: payout.String()}
+	restore2 := swapMainnet(n)
+	defer restore2()
+
+	seedAddresses(t, a, ctx, n)
+	if err := runUpgrade(t, a, ctx); err != nil {
+		t.Fatalf("paying a seat to a never-existed address must succeed: %v", err)
+	}
+
+	acc := a.AppKeepers.AccountKeeper.GetAccount(ctx, payout)
+	if acc == nil {
+		t.Fatal("the seat payment did not create the account")
+	}
+	if _, ok := acc.(*authtypes.BaseAccount); !ok {
+		t.Fatalf("expected a plain BaseAccount, got %T", acc)
+	}
+
+	got := a.AppKeepers.BankKeeper.GetBalance(ctx, payout, config.BondDenom).Amount
+	want := config.ToUscrt(config.ReservedSeatSCRT)
+	if !got.Equal(want) {
+		t.Fatalf("seat payout = %s, want exactly %s (no seed term)", got, want)
+	}
+	t.Logf("created on payment: %s holds exactly %s uscrt as a BaseAccount", payout, got)
 }

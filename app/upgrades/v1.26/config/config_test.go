@@ -119,6 +119,84 @@ func TestBucketShapesMatchProposal(t *testing.T) {
 	}
 }
 
+// TestMainnetDestinationBuckets pins the secret-4-only extra rows.
+// foundation + foundation_a = 299M; core_development + core_development_a = 299M;
+// same vest as the parents; mint still 1,079,000,000.
+func TestMainnetDestinationBuckets(t *testing.T) {
+	want := map[string]struct {
+		total    int64
+		liquid   int64
+		kind     VestKind
+		cliff    int
+		duration int
+	}{
+		"foundation":              {262_975_000, 10, VestContinuous, 6, 60},
+		"foundation_a":            {36_025_000, 10, VestContinuous, 6, 60},
+		"core_development":        {262_975_000, 10, VestContinuous, 6, 60},
+		"core_development_a":      {36_025_000, 10, VestContinuous, 6, 60},
+		"advisors":                {72_000_000, 0, VestPeriodicQuarterly, 6, 48},
+		"ecosystem_fund":          {178_000_000, 100, VestNone, 0, 0},
+		"research_development":    {72_000_000, 10, VestContinuous, 0, 60},
+		"builder_relayer_support": {43_000_000, 100, VestNone, 0, 0},
+		"remediation":             {44_000_000, 30, VestContinuous, 6, 24},
+	}
+
+	got := Mainnet.Allocations()
+	if len(got) != len(want) {
+		t.Fatalf("mainnet got %d buckets, want %d", len(got), len(want))
+	}
+	var found, core int64
+	for _, a := range got {
+		w, ok := want[a.Name]
+		if !ok {
+			t.Fatalf("unexpected mainnet bucket %q", a.Name)
+		}
+		if a.TotalSCRT != w.total || a.LiquidPct != w.liquid || a.Kind != w.kind ||
+			a.CliffMonths != w.cliff || a.DurationMonths != w.duration {
+			t.Errorf("bucket %s = {total %d, liquid %d%%, kind %d, cliff %d, duration %d}; want {%d, %d%%, %d, %d, %d}",
+				a.Name, a.TotalSCRT, a.LiquidPct, a.Kind, a.CliffMonths, a.DurationMonths,
+				w.total, w.liquid, w.kind, w.cliff, w.duration)
+		}
+		switch a.Name {
+		case "foundation", "foundation_a":
+			found += a.TotalSCRT
+		case "core_development", "core_development_a":
+			core += a.TotalSCRT
+		}
+	}
+	if found != 299_000_000 {
+		t.Fatalf("foundation + foundation_a = %d, want 299000000", found)
+	}
+	if core != 299_000_000 {
+		t.Fatalf("core_development + core_development_a = %d, want 299000000", core)
+	}
+	if Mainnet.Addresses.FoundationA != "secret1508hr88eunka33yf3x5628uwmt5t8a3qcy4h0r" {
+		t.Fatalf("foundation_a address = %s", Mainnet.Addresses.FoundationA)
+	}
+	if Mainnet.Addresses.CoreDevelopmentA != "secret1a68ex7zrxchc27arpfsvff3rlcxwkvw02n7nrd" {
+		t.Fatalf("core_development_a address = %s", Mainnet.Addresses.CoreDevelopmentA)
+	}
+	if err := Validate(Mainnet); err != nil {
+		t.Fatalf("Mainnet must Validate: %v", err)
+	}
+	liquid := sdkmath.ZeroInt()
+	for _, a := range got {
+		liquid = liquid.Add(a.Liquid())
+	}
+	liquid = liquid.Add(ToUscrt(Mainnet.ValidatorProgram().UpfrontPoolSCRT()))
+	if gotLiq := liquid.QuoRaw(MicroUnitsPerSCRT).Int64(); gotLiq != 308_400_000 {
+		t.Fatalf("mainnet day-one liquid = %d, want 308400000 (split does not change liquid)", gotLiq)
+	}
+
+	for _, n := range []Network{Pulsar, LocalSecret, fixture()} {
+		for _, a := range n.Allocations() {
+			if a.Name == "foundation_a" || a.Name == "core_development_a" {
+				t.Fatalf("%s (%s) must not emit extra destination %q", n.Name, n.ChainID, a.Name)
+			}
+		}
+	}
+}
+
 // TestDayOneLiquidMatchesProposal checks the total immediately-spendable amount
 // against v24's own stated figure of "about 308M SCRT (~21.4%)".
 //
