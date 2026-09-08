@@ -2,7 +2,7 @@
 
 <div align="center">
   
-[![version](https://img.shields.io/badge/version-1.12.1-blue)](https://github.com/scrtlabs/SecretNetwork/releases/tag/v1.12.1)
+[![version](https://img.shields.io/badge/version-1.26.0-blue)](https://github.com/Secret3dev/SecretNetwork/releases/tag/v1.26.0-community-continuance)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-v2.0%20adopted-ff69b4.svg)](CODE_OF_CONDUCT.md)
 <a href="https://twitter.com/intent/follow?screen_name=SecretNetwork">
 <img src="https://img.shields.io/twitter/follow/SecretNetwork?style=social&logo=twitter"
@@ -21,7 +21,7 @@ Secret Network offers scalable permissionless smart contracts with a private by 
 
 Click the button below to start a new development environment:
 
-[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/scrtlabs/SecretNetwork)
+[![Open in Gitpod](https://gitpod.io/button/open-in-gitpod.svg)](https://gitpod.io/#https://github.com/Secret3dev/SecretNetwork)
 
 ### VSCode Docker Environment
 
@@ -37,7 +37,7 @@ Click the button below to start a new development environment:
 
 ## Manual Set up
 
-*You can find everything below in a handy script that you can copy and run from [here](https://github.com/scrtlabs/SecretNetwork/blob/master/scripts/install-everything.sh)*
+*You can find everything below in a handy script that you can copy and run from [here](./scripts/install-everything.sh)*
 
 ### Install prerequisite packages
 
@@ -79,8 +79,8 @@ sudo dpkg -i libssl1.1_1.1.1w-0+deb11u1_amd64.deb
 
 Clone this repo to your favorite working directory. e.g. ~/SecretNetwork
 ```
-git clone git@github.com:scrtlabs/SecretNetwork.git ~/SecretNetwork
-cd ~SecretNetwork
+git clone git@github.com:Secret3dev/SecretNetwork.git ~/SecretNetwork
+cd ~/SecretNetwork
 git checkout <work-branch>
 ```
 
@@ -145,7 +145,7 @@ ln -s $SGX_HOME/lib64/libsgx_epid.so $SGX_HOME/sdk_libs/libsgx_epid.so
 ```
 as this library will be required during building.
 
-Note: If you are using WSL you'll need to use the 5.15 kernel which you can find how to do [here](https://github.com/scrtlabs/SecretNetwork/blob/master/docs/SGX%20on%20WSL%20(SW).md), otherwise you'll have to run anything SGX related only in docker
+Note: If you are using WSL you'll need to use the 5.15 kernel which you can find how to do [here](./docs/SGX%20on%20WSL%20(SW).md), otherwise you'll have to run anything SGX related only in docker
 
 ### Install DCAP
 ```
@@ -205,11 +205,11 @@ export SCRT_ENCLAVE_DIR=~/SecretNetwork/go-cosmwasm
 In order to run __secretd__ you need to have built _librust_cosmwasm_enclave.signed.so_.
 The latter can be built by cloning:
 ```
-git clone git@github.com:scrtlabs/tm-secret-enclave.git ~/tm-secret-enclave
+git clone git@github.com:Secret3dev/tm-secret-enclave.git ~/tm-secret-enclave
 ```
 This repo also uses submodules:
 ```
-cd tm-secret-enclave
+cd ~/tm-secret-enclave
 git submodule init
 git submodule update --remote
 make build-rust
