@@ -7,6 +7,9 @@
 #   I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes ./autopilot.sh install
 #
 # Signatures go to https://upgrade.secret3.dev upgrade id secret-4-v1.27.2.
+#
+# install execs halt.sh. SECRETD_HOME and SERVICE_UNIT_FILE are read there.
+# Leave them unset and halt.sh scans the default homes and does not restore a unit.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -17,6 +20,7 @@ CMD="${1:-print}"
 die() { echo "FATAL: $*" >&2; exit 1; }
 ok() { echo "OK  $*"; }
 
+# Refuse unless this upgrade is the one current secret-4 row and H matches the package.
 require_current() {
   local rec state ids
   rec="$(curl -fsS --max-time 20 "$API/v1/upgrades/$UPGRADE_ID")" \
@@ -28,6 +32,7 @@ require_current() {
   if [[ "$state" != "current" ]]; then
     die "upgrade $UPGRADE_ID is not the current secret-4 upgrade (state=${state:-unset})."
   fi
+  # The current list for secret-4 must be this id and nothing else.
   ids="$(curl -fsS --max-time 20 "$API/v1/upgrades?chain_id=secret-4&state=current" \
     | python3 -c 'import json,sys; rows=json.load(sys.stdin).get("upgrades") or []; print(" ".join(r.get("id") or "" for r in rows))')"
   [[ "$ids" == "$UPGRADE_ID" ]] || die "secret-4 current upgrade is [$ids], not $UPGRADE_ID"
@@ -36,6 +41,7 @@ require_current() {
   [[ "$api_h" == "$H" ]] || die "collector measurement $api_h does not match this package"
 }
 
+# Package for this Ubuntu release. H.txt must be 64 hex. Then require_current.
 os_id="$(. /etc/os-release; printf '%s' "${VERSION_ID:-}")"
 case "$os_id" in
   22.04|24.04) ;;
@@ -49,6 +55,7 @@ require_current
 
 case "$CMD" in
   print|"")
+    # Show the package and measurement. Does not stop the node.
     echo "chain        secret-4"
     echo "plan         v1.27.2"
     echo "from         1.26.0"
@@ -60,6 +67,7 @@ case "$CMD" in
     echo "At the halt:  I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes $0 install"
     ;;
   sign)
+    # Sign H with this node's validator key and send that signature to the collector.
     command -v secretd >/dev/null || die "secretd is not on PATH"
     out="$(secretd emergency_approve_upgrade "$H" 2>&1)" || {
       printf '%s\n' "$out" >&2
@@ -82,6 +90,7 @@ case "$CMD" in
     esac
     ;;
   install)
+    # halt.sh stops the node, runs the handover on 1.26.0, then installs the package.
     exec "$ROOT/halt.sh" --install
     ;;
   *)
