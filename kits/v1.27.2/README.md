@@ -65,11 +65,14 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
 Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above.
 
-The node has halted. `secretd` is `1.26.0`. `migration_consensus.json` is already in `/opt/secret/.sgx_secrets`. Do not delete that file. Do not install the package until after `check-hw --migrate_op 3`.
+The node has halted. `secretd` is `1.26.0`. The collector serves the combined file once 7 signatures are in, and keeps serving it until this upgrade is marked done. Pull that file, then run the handover. Do not delete it. Do not install the package until after `check-hw --migrate_op 3`.
 
 `EXTRA_HEIGHT` is the height in `upgrade-info.json`. On Ubuntu 24.04 use the `ubuntu-24.04` package instead of the one below. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
 
 ```bash
+curl -fsS -o /tmp/migration_consensus.json https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus
+sudo cp /tmp/migration_consensus.json /opt/secret/.sgx_secrets/migration_consensus.json
+
 sudo systemctl stop secret-node
 
 export SCRT_SGX_STORAGE=/opt/secret/.sgx_secrets
