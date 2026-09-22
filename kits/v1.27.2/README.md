@@ -67,6 +67,18 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
 Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above.
 
+Get the binaries into this directory before the halt. Run this from `mainnet`. If a download fails, stop. The node is still up. These commands do not install the package.
+
+```bash
+mkdir -p ubuntu-22.04 ubuntu-24.04 check-hw
+base=https://raw.githubusercontent.com/Secret3dev/SecretNetwork/secretcommunity-release-1/kits/v1.27.2/mainnet
+curl -fL --retry 3 -o ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb "$base/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb" || exit 1
+curl -fL --retry 3 -o ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb "$base/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb" || exit 1
+curl -fL --retry 3 -o check-hw/check-hw "$base/check-hw/check-hw" || exit 1
+chmod +x check-hw/check-hw
+( cd .. && sha256sum -c --ignore-missing SHA256SUMS ) || exit 1
+```
+
 The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
 
 Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, it prints the collector reply. `have` is how many signatures are in. `need` is 7. Stop here. The node is still up.
