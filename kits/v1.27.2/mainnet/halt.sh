@@ -68,6 +68,24 @@ DEB="${DEB:-$ROOT/ubuntu-${os_id}/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_u
 [[ -s "$DEB" ]] || die "missing package $DEB"
 [[ -x "$CHECK_HW" ]] || die "missing $CHECK_HW"
 
+# SHA256SUMS is one directory above mainnet. Check the package this host will
+# install, and the check-hw binary that will run. Another Ubuntu package is
+# not required. A missing line or a different hash exits before the node stops.
+sum_line_hash() {
+  local rel="$1" sums="$ROOT/../SHA256SUMS" line count
+  [[ -s "$sums" ]] || die "missing $sums"
+  line="$(grep -F "  ${rel}" "$sums")" || die "SHA256SUMS has no line for ${rel}"
+  count="$(printf '%s\n' "$line" | wc -l | tr -d ' ')"
+  [[ "$count" == "1" ]] || die "SHA256SUMS has ${count} lines for ${rel}"
+  printf '%s' "${line%% *}"
+}
+got="$(sha256sum "$DEB" | awk '{print $1}')"
+want="$(sum_line_hash "mainnet/${DEB#"$ROOT"/}")"
+[[ "$got" == "$want" ]] || die "package sha256 ${got} != SHA256SUMS ${want}"
+got="$(sha256sum "$CHECK_HW" | awk '{print $1}')"
+want="$(sum_line_hash "mainnet/check-hw/check-hw")"
+[[ "$got" == "$want" ]] || die "check-hw sha256 ${got} != SHA256SUMS ${want}"
+
 # Measurement is the 32 bytes at the SGX sigstruct offset. It must equal H.txt.
 mrenclave_of() {
   python3 - "$1" <<'PY'
@@ -205,6 +223,14 @@ else
   die "systemd unit $SERVICE not found. Set SERVICE to this node's unit name."
 fi
 
+# The unit's SCRT_SGX_STORAGE is the directory the node reads. A different
+# path here writes the handover where that node will not look. Unset in the
+# unit means the binary default, which is the script default.
+unit_store="$(systemctl show -p Environment --value "$SERVICE" | tr ' ' '\n' | sed -n 's/^SCRT_SGX_STORAGE=//p' | tail -1)"
+if [[ -n "$unit_store" && "$unit_store" != "$SCRT_SGX_STORAGE" ]]; then
+  die "systemd $SERVICE SCRT_SGX_STORAGE=$unit_store but this script uses $SCRT_SGX_STORAGE. Set SCRT_SGX_STORAGE to the unit path."
+fi
+
 # Signed handover file. This script does not download it.
 [[ -s "$SCRT_SGX_STORAGE/migration_consensus.json" ]] \
   || die "missing $SCRT_SGX_STORAGE/migration_consensus.json"
@@ -219,7 +245,8 @@ stamp_dest3() {
 }
 
 # check-hw loads ./check_hw_enclave.so from its working directory.
-# Op 1 can fail the Intel quote and still pass if migration_report_local.bin was written.
+# Op 1 can fail the Intel quote and still pass if this run wrote migration_report_local.bin.
+# Cleanup already removed any older report. A report that survives cleanup is fatal.
 # Op 3 must stamp random_proof_hstar to the plan height.
 run_check_hw() {
   local op="$1"
@@ -235,7 +262,7 @@ run_check_hw() {
   out="$(mktemp)"
   if ! ( cd "$cwd" && "$hwabs" --migrate_op "$op" >"$out" 2>&1 ); then
     cat "$out" >&2
-    if [[ "$op" == "1" && -s "$SCRT_SGX_STORAGE/migration_report_local.bin" ]]; then
+    if [[ "$op" == "1" ]] && sudo test -s "$SCRT_SGX_STORAGE/migration_report_local.bin"; then
       ok "check-hw 1 wrote the local report"
       rm -rf "$cwd" "$out"
       return 0
@@ -284,16 +311,37 @@ oldv="$(secretd version 2>/dev/null | head -1 || true)"
 sudo systemctl stop "$SERVICE"
 
 # Keep migration_consensus.json. Remove every other migration_* file.
+# sudo: those files are often owned by the service user. A failed delete exits.
+# An old migration_report_local.bin must not remain. check-hw 1 treats a
+# nonempty report as success when the Intel quote fails.
 json_bak="$(mktemp)"
 cp -a "$SCRT_SGX_STORAGE/migration_consensus.json" "$json_bak"
-find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete || true
+sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
+if sudo test -e "$SCRT_SGX_STORAGE/migration_report_local.bin"; then
+  die "migration_report_local.bin is still present after cleanup"
+fi
 cp -a "$json_bak" "$SCRT_SGX_STORAGE/migration_consensus.json"
 
 # 5 self target info, check-hw 1 report, 2 export, stamp halt height, check-hw 3 import.
+# migrate_op 2 runs on the installed 1.26 enclave. On-chain next_mr returns
+# before the emergency file is read. This halt requires the emergency threshold.
 export SCRT_SGX_STORAGE EXTRA_HEIGHT PLAN_HEIGHT
 secretd migrate_op 5
 run_check_hw 1
-secretd migrate_op 2
+op2_out="$(mktemp)"
+set +e
+secretd migrate_op 2 >"$op2_out" 2>&1
+op2_rc=$?
+set -e
+cat "$op2_out"
+[[ "$op2_rc" -eq 0 ]] || die "migrate_op 2 failed"
+if grep -F -q "Migration is authorized by on-chain consensus" "$op2_out"; then
+  die "migrate_op 2 authorized by on-chain consensus. This halt uses the emergency file."
+fi
+grep -F -q "Migration is authorized by off-chain (emergency) consensus" "$op2_out" \
+  || die "migrate_op 2 did not print off-chain (emergency) consensus"
+grep -F -q "Emergency threshold reached: true" "$op2_out" \
+  || die "migrate_op 2 emergency threshold was not reached"
 stamp_dest3
 run_check_hw 3
 

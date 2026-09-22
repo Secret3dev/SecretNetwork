@@ -11,6 +11,7 @@
 # install waits until the collector is serving the combined file, writes it, then
 # execs halt.sh. SECRETD_HOME and SERVICE_UNIT_FILE are read there.
 # Leave them unset and halt.sh scans the default homes and does not restore a unit.
+# sign reads $HOME/.secretd. The binary ignores --home. SECRETD_HOME does not change sign.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -69,6 +70,12 @@ case "$CMD" in
     ;;
   sign)
     # Sign H with this node's validator key and send that signature to the collector.
+    # emergency_approve_upgrade reads $HOME/.secretd. The 1.26 binary ignores --home.
+    if [[ -n "${SECRETD_HOME:-}" ]]; then
+      sign_home="$(readlink -f "${HOME}/.secretd")"
+      intent_home="$(readlink -f "$SECRETD_HOME")"
+      [[ "$sign_home" == "$intent_home" ]] || die "emergency_approve_upgrade reads ${HOME}/.secretd and ignores --home. SECRETD_HOME is $SECRETD_HOME."
+    fi
     command -v secretd >/dev/null || die "secretd is not on PATH"
     out="$(secretd emergency_approve_upgrade "$H" 2>&1)" || {
       printf '%s\n' "$out" >&2

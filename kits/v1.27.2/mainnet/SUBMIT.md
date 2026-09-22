@@ -1,15 +1,17 @@
 # Submit the secret-4 v1.27.2 proposal
 
-This has not been broadcast.
+Proposal 377 is submitted. It is in the voting period. Do not submit it again.
 
-`proposal.json` is an expedited software-upgrade proposal.
+`proposal.json` is the expedited software-upgrade proposal that was submitted.
 
 - Plan name: `v1.27.2`
 - Height: `27286266`
 - That height is 8:30am Eastern on Wednesday 23 September 2026 (12:30 UTC).
 - It was projected from mainnet height 27260562 at 2026-09-21 19:46 UTC, using 5.703 seconds per block over the previous 10,000 blocks.
 - Deposit: `2500000000uscrt` (2,500 SCRT). That is the full expedited minimum, so voting starts immediately.
-- Expedited voting lasts 24 hours. Submit before 8:30am Eastern on Tuesday 22 September 2026 so voting finishes before the halt.
+- Expedited voting lasts 24 hours. It was submitted in time for voting to finish before the halt.
+
+This is the command that was used. Do not run it again.
 
 From a machine with a mainnet key that can pay the deposit:
 

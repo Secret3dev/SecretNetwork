@@ -51,7 +51,8 @@ truthy_yes "${I_UNDERSTAND:-}" || die "set I_UNDERSTAND=yes"
 truthy_yes "${I_CONFIRM_PRECHECK:-}" || die "set I_CONFIRM_PRECHECK=yes"
 oldv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$oldv" == "1.27.0" ]] || die "secretd is ${oldv:-empty} (want 1.27.0)"
-sudo systemctl stop "$SERVICE" || true
+# A failed stop exits before dpkg. An already stopped unit still returns 0.
+sudo systemctl stop "$SERVICE"
 sudo dpkg -i "$DEB"
 newv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$newv" == "1.27.2" ]] || die "secretd is ${newv:-empty} after install"

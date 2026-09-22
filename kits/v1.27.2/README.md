@@ -34,7 +34,7 @@ That command waits until the collector is serving the combined file, writes it t
 
 Track the upgrade at https://secretnodes.com/secret-4/upgrade/secret-4-v1.27.2
 
-`sign` sends this node's signature to https://upgrade.secret3.dev for `secret-4-v1.27.2`.
+`sign` sends this node's signature to https://upgrade.secret3.dev for `secret-4-v1.27.2`. It reads `$HOME/.secretd`. `SECRETD_HOME` does not change that.
 
 ### Optional
 
@@ -81,13 +81,19 @@ chmod +x check-hw/check-hw
 
 The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
 
-Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, it prints the collector reply. `have` is how many signatures are in. `need` is 7. Stop here. The node is still up.
+Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, it prints the collector reply. `have` is how many signatures are in. `need` is 7. A 200 body that is not the address map is not copied. If the unit sets `SCRT_SGX_STORAGE`, export that same path before this block and before the handover. Stop here. The node is still up.
 
 ```bash
+export SCRT_SGX_STORAGE="${SCRT_SGX_STORAGE:-/opt/secret/.sgx_secrets}"
 rm -f /tmp/migration_consensus.json
 code=$(curl -sS -o /tmp/migration_consensus.json -w '%{http_code}' --max-time 20 https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus) || true
 if [ "$code" = 200 ]; then
-  sudo cp /tmp/migration_consensus.json /opt/secret/.sgx_secrets/migration_consensus.json
+  python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and d
+for k,v in d.items():
+    assert re.fullmatch(r"[0-9A-F]{40}", k)
+    assert isinstance(v, list) and len(v)==2 and all(isinstance(x, str) and x for x in v)' /tmp/migration_consensus.json || exit 1
+  sudo mkdir -p "$SCRT_SGX_STORAGE"
+  sudo cp /tmp/migration_consensus.json "$SCRT_SGX_STORAGE/migration_consensus.json" || exit 1
 else
   echo "combined file is not ready (HTTP $code)"
   cat /tmp/migration_consensus.json
@@ -96,28 +102,52 @@ else
 fi
 ```
 
-Run this from the `mainnet` directory, and only after that file is on disk. `27286266` is the height in `upgrade-info.json`. On Ubuntu 24.04 use the `ubuntu-24.04` package instead of the one below. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
+Run this from the `mainnet` directory, and only after that file is on disk. `27286266` is the height in `upgrade-info.json`. The package is the one for this Ubuntu version. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
 
 ```bash
-test -s /opt/secret/.sgx_secrets/migration_consensus.json || exit 1
-cd check-hw || exit 1
-sudo systemctl stop secret-node
+export SCRT_SGX_STORAGE="${SCRT_SGX_STORAGE:-/opt/secret/.sgx_secrets}"
+test -s "$SCRT_SGX_STORAGE/migration_consensus.json" || exit 1
+test "$(secretd version | head -1)" = 1.26.0 || exit 1
+if systemctl show -p ExecStart secret-node | grep -q -- '--bootstrap'; then exit 1; fi
+if systemctl show -p ExecStart secret-node | grep -q -- 'unsafe-skip-upgrades'; then exit 1; fi
 
-export SCRT_SGX_STORAGE=/opt/secret/.sgx_secrets
+unit_store="$(systemctl show -p Environment --value secret-node | tr ' ' '\n' | sed -n 's/^SCRT_SGX_STORAGE=//p' | tail -1)"
+if [ -n "$unit_store" ] && [ "$unit_store" != "$SCRT_SGX_STORAGE" ]; then
+  echo "unit SCRT_SGX_STORAGE=$unit_store"
+  exit 1
+fi
+
+. /etc/os-release
+case "$VERSION_ID" in 22.04|24.04) ;; *) exit 1 ;; esac
+deb="ubuntu-${VERSION_ID}/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-${VERSION_ID}.deb"
+test -s "$deb" || exit 1
+
+cd check-hw || exit 1
+sudo systemctl stop secret-node || exit 1
+
 export EXTRA_HEIGHT=27286266
 
-find $SCRT_SGX_STORAGE -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
+sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete || exit 1
+if sudo test -e "$SCRT_SGX_STORAGE/migration_report_local.bin"; then exit 1; fi
 
 secretd migrate_op 5 || exit 1
 
-dpkg-deb -x ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb /tmp/sn127
-cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so
-./check-hw --migrate_op 1
-secretd migrate_op 2 || exit 1
-echo "$EXTRA_HEIGHT" > $SCRT_SGX_STORAGE/halt_height || exit 1
+rm -rf /tmp/sn127
+dpkg-deb -x "../$deb" /tmp/sn127 || exit 1
+cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so || exit 1
+./check-hw --migrate_op 1 || sudo test -s "$SCRT_SGX_STORAGE/migration_report_local.bin" || exit 1
+
+op2="$(mktemp)"
+secretd migrate_op 2 >"$op2" 2>&1 || { cat "$op2"; exit 1; }
+cat "$op2"
+if grep -F -q "Migration is authorized by on-chain consensus" "$op2"; then exit 1; fi
+grep -F -q "Migration is authorized by off-chain (emergency) consensus" "$op2" || exit 1
+grep -F -q "Emergency threshold reached: true" "$op2" || exit 1
+
+echo "$EXTRA_HEIGHT" > "$SCRT_SGX_STORAGE/halt_height" || exit 1
 ./check-hw --migrate_op 3 || exit 1
 
-sudo dpkg -i ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb || exit 1
+sudo dpkg -i "../$deb" || exit 1
 ```
 
 If `dpkg` replaced a customized `/etc/systemd/system/secret-node.service`, copy your backup back and run `sudo systemctl daemon-reload` before start.
