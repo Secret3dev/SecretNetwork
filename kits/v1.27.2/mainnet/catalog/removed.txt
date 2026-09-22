@@ -1,0 +1,5 @@
+# On the live 1.26 emergency list; not compiled into 1.27. Reason after |.
+90D3EAB32E1A7BDD4BCEB233D9BB49D07EBD32C9  # CryptoCrew | Left the active set
+2E76AE6E453395F35D6C0728D44FB6147CE5B5A0  # Citadel.one | Left the active set
+C48710DB80EA8538C8E8BA17035D62630AF5C216  # Node.Monster | Left the active set
+3199A17457ADAED098B8EB1DC932CC7DFBDC54E7  # melea | Left the active set

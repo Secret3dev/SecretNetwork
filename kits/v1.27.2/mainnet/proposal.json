@@ -1,0 +1,18 @@
+{
+  "messages": [
+    {
+      "@type": "/cosmos.upgrade.v1beta1.MsgSoftwareUpgrade",
+      "authority": "secret10d07y265gmmuvt4z0w9aw880jnsr700jc88vt0",
+      "plan": {
+        "name": "v1.27.2",
+        "height": "27286266",
+        "info": ""
+      }
+    }
+  ],
+  "metadata": "",
+  "deposit": "2500000000uscrt",
+  "title": "Secret Network mainnet: software upgrade v1.27.2",
+  "summary": "Upgrade secret-4 to v1.27.2 at height 27286266. At the halt, keep the current package installed, run the published upgrade helper, then install the 1.27.2 package. Do not replace the package before the helper finishes.",
+  "expedited": true
+}

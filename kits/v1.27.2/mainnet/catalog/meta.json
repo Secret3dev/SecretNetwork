@@ -1,0 +1,15 @@
+{
+  "id": "secret-4-v1.27.2",
+  "chain_id": "secret-4",
+  "network": "mainnet",
+  "upgrade_name": "v1.27.2",
+  "pkg_ver": "1.27.2",
+  "pkg_tag": "MAINNET",
+  "os_tags": ["ubuntu-22.04", "ubuntu-24.04"],
+  "H": "f0d59dd2561b1c86de88ef27b8b9146bcc2c1b02875ba3c48db48a32bb20d90b",
+  "need": 7,
+  "published": true,
+  "state": "current",
+  "created": "2026-09-21T19:45:00+00:00",
+  "closed": null
+}

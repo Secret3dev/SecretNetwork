@@ -1,0 +1,5 @@
+5ce31f1be3350b8d5d8757eec8c068adfc1b2e34c9aeaf6d8a3ff1eb9e252a1a  testnet/ubuntu-22.04/secretnetwork_1.27.2_TRINITY_goleveldb_amd64_ubuntu-22.04.deb
+de19050e32b7704b463876fa085289ca05c26fcdcb60711d8ef0249d78b05eeb  testnet/ubuntu-24.04/secretnetwork_1.27.2_TRINITY_goleveldb_amd64_ubuntu-24.04.deb
+ffcca0fe04422228ae92b0bb216808a0eafa1030a7073d1bf1ca347a0781fcbb  mainnet/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
+f90e7104d6308d491c9cfdb691672302b17b3364c3b355962479adc46da3d903  mainnet/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb
+5f1fb76fb611e91bd8bb1ec3f12bb21216d66a0782b6bf21968309897c2c122d  mainnet/check-hw/check-hw
