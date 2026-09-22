@@ -118,15 +118,19 @@ cd check-hw || exit 1
 sudo systemctl stop secret-node || exit 1
 
 export EXTRA_HEIGHT=27286266
+# Deletes other migration_* files. Leaves migration_consensus.json.
 sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete || exit 1
 
 secretd migrate_op 5 || exit 1
+# Unpacks the package so the next line can copy the signed enclave. Does not install.
 dpkg-deb -x "../$deb" /tmp/sn127 || exit 1
 cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so || exit 1
+# Writes migration_report_local.bin. Stop if that file is missing. migrate_op 2 cannot export without it.
 ./check-hw --migrate_op 1 || sudo test -s "$SCRT_SGX_STORAGE/migration_report_local.bin" || exit 1
 secretd migrate_op 2 || exit 1
 echo "$EXTRA_HEIGHT" > "$SCRT_SGX_STORAGE/halt_height" || exit 1
 ./check-hw --migrate_op 3 || exit 1
+# Installs the package. This line does not run when check-hw 3 fails.
 sudo dpkg -i "../$deb" || exit 1
 ```
 
