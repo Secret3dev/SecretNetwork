@@ -88,6 +88,7 @@ Run this from the `mainnet` directory, and only after that file is on disk. `272
 
 ```bash
 test -s /opt/secret/.sgx_secrets/migration_consensus.json || exit 1
+cd check-hw || exit 1
 sudo systemctl stop secret-node
 
 export SCRT_SGX_STORAGE=/opt/secret/.sgx_secrets
@@ -97,23 +98,21 @@ find $SCRT_SGX_STORAGE -maxdepth 1 -name 'migration_*' ! -name 'migration_consen
 
 secretd migrate_op 5
 
-cd check-hw
 dpkg-deb -x ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb /tmp/sn127
 cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so
 ./check-hw --migrate_op 1
 secretd migrate_op 2
 echo "$EXTRA_HEIGHT" > $SCRT_SGX_STORAGE/halt_height
-./check-hw --migrate_op 3
+./check-hw --migrate_op 3 || exit 1
+
+sudo dpkg -i ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb || exit 1
 ```
 
-After `check-hw --migrate_op 3` has finished, install the package and start the node. From the `mainnet` directory:
+If `dpkg` replaced a customized `/etc/systemd/system/secret-node.service`, copy your backup back and run `sudo systemctl daemon-reload` before start.
 
 ```bash
-sudo dpkg -i ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
 sudo systemctl start secret-node
 ```
-
-If `dpkg` replaced a customized `/etc/systemd/system/secret-node.service`, copy your backup back, run `sudo systemctl daemon-reload`, then start.
 
 The collector marks one upgrade `current` per network, by hand. `autopilot.sh` runs only when `secret-4-v1.27.2` is that current upgrade and the measurement matches this package. After the upgrade is marked `done`, the script exits and the collector stops serving the combined file. `testnet/halt.sh` exits the same way once `trinity-b-v1.27.0-r10` is marked done.
 
