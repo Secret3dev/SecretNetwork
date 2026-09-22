@@ -51,6 +51,7 @@ truthy_yes() {
   esac
 }
 
+# secret-4 plan v1.27.2 only. SKIP_DEST3 would skip the handover.
 if truthy_yes "${SKIP_DEST3:-}"; then
   die "this halt must run the handover. Do not set SKIP_DEST3"
 fi
@@ -66,6 +67,7 @@ esac
 DEB="${DEB:-$ROOT/ubuntu-${os_id}/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-${os_id}.deb}"
 [[ -s "$DEB" ]] || die "missing package $DEB"
 
+# Measurement is the 32 bytes at the SGX sigstruct offset. It must equal H.txt.
 mrenclave_of() {
   python3 - "$1" <<'PY'
 import binascii, sys
@@ -167,6 +169,7 @@ fi
 [[ -s "$SCRT_SGX_STORAGE/migration_consensus.json" ]] \
   || die "missing $SCRT_SGX_STORAGE/migration_consensus.json"
 
+# check-hw 3 reads halt_height. The value is the plan height from upgrade-info.json.
 stamp_dest3() {
   mkdir -p "$SCRT_SGX_STORAGE"
   printf '%s\n' "$PLAN_HEIGHT" > "$SCRT_SGX_STORAGE/halt_height" \
@@ -175,6 +178,9 @@ stamp_dest3() {
   ok "halt_height=$PLAN_HEIGHT"
 }
 
+# check-hw loads ./check_hw_enclave.so from its working directory.
+# Op 1 can fail the Intel quote and still pass if migration_report_local.bin was written.
+# Op 3 must stamp random_proof_hstar to the plan height.
 run_check_hw() {
   local op="$1"
   [[ -x "$CHECK_HW" ]] || die "missing $CHECK_HW"
@@ -216,6 +222,7 @@ echo "secret-4 v1.27.2 halt  install=$DO_INSTALL"
 echo "  service=$SERVICE package=$DEB"
 echo "  measurement=$expect_h"
 
+# No --install: print the plan and exit. The node stays up.
 if [[ "$DO_INSTALL" -ne 1 ]]; then
   ok "dry-run. At halt this stops $SERVICE, runs the handover, installs the package, then starts $SERVICE."
   exit 0
@@ -253,6 +260,7 @@ run_check_hw 3
 [[ -s "$SCRT_SGX_STORAGE/data-${MRENCLAVE_EXPECT}.bin" ]] \
   || die "missing sealed data-${MRENCLAVE_EXPECT}.bin after the handover"
 
+# Install 1.27.2. secretd must report 1.27.2 and the installed enclave must match H.txt.
 sudo dpkg -i "$DEB"
 newv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$newv" == "1.27.2" ]] || die "package installed but secretd version is ${newv:-empty}"
@@ -271,6 +279,7 @@ if [[ -n "${SERVICE_UNIT_FILE:-}" ]]; then
   fi
 fi
 
+# Start the node on 1.27.2.
 sudo systemctl enable "$SERVICE"
 sudo systemctl start "$SERVICE"
 ok "started $SERVICE on 1.27.2"
