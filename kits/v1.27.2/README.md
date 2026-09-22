@@ -30,6 +30,8 @@ Do not install the package before the node halts. The handover runs first, then 
 cd mainnet && I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes ./autopilot.sh install
 ```
 
+That command waits until the collector is serving the combined file, writes it to `/opt/secret/.sgx_secrets/migration_consensus.json`, then runs the handover. The node stays up while it waits.
+
 Track the upgrade at https://secretnodes.com/secret-4/upgrade/secret-4-v1.27.2
 
 `sign` sends this node's signature to https://upgrade.secret3.dev for `secret-4-v1.27.2`.

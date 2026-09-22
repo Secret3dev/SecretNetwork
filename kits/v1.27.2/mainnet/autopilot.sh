@@ -8,7 +8,8 @@
 #
 # Signatures go to https://upgrade.secret3.dev upgrade id secret-4-v1.27.2.
 #
-# install execs halt.sh. SECRETD_HOME and SERVICE_UNIT_FILE are read there.
+# install waits until the collector is serving the combined file, writes it, then
+# execs halt.sh. SECRETD_HOME and SERVICE_UNIT_FILE are read there.
 # Leave them unset and halt.sh scans the default homes and does not restore a unit.
 set -euo pipefail
 
@@ -90,6 +91,32 @@ case "$CMD" in
     esac
     ;;
   install)
+    # The collector serves the combined file once 7 signatures are in.
+    # Write that file before halt.sh. The node stays up while this waits.
+    dest="${SCRT_SGX_STORAGE:-/opt/secret/.sgx_secrets}/migration_consensus.json"
+    url="$API/v1/upgrades/$UPGRADE_ID/consensus"
+    while true; do
+      code="$(curl -sS -o /tmp/migration_consensus.json -w '%{http_code}' --max-time 20 "$url" || true)"
+      if [[ "$code" == "200" ]]; then
+        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and len(d) >= 1' /tmp/migration_consensus.json \
+          || die "collector returned a body that is not the combined file"
+        break
+      fi
+      if [[ "$code" == "410" ]]; then
+        die "upgrade $UPGRADE_ID is done. Combined file is no longer served."
+      fi
+      echo "waiting for combined file (HTTP ${code:-none}). node is still up."
+      sleep 15
+    done
+    sudo mkdir -p "$(dirname "$dest")"
+    if [[ -w "$(dirname "$dest")" ]]; then
+      cp /tmp/migration_consensus.json "$dest"
+    else
+      sudo cp /tmp/migration_consensus.json "$dest"
+      sudo chown "$(id -u):$(id -g)" "$dest"
+    fi
+    [[ -s "$dest" ]] || die "could not write $dest"
+    ok "wrote $dest"
     # halt.sh stops the node, runs the handover on 1.26.0, then installs the package.
     exec "$ROOT/halt.sh" --install
     ;;
