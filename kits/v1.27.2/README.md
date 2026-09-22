@@ -67,18 +67,23 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
 Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above.
 
-The node has halted. `secretd` is `1.26.0`. The collector serves the combined file once 7 signatures are in, and keeps serving it until this upgrade is marked done. Pull that file, then run the handover. Do not delete it. Do not install the package until after `check-hw --migrate_op 3`.
+The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
 
-`EXTRA_HEIGHT` is the height in `upgrade-info.json`. On Ubuntu 24.04 use the `ubuntu-24.04` package instead of the one below. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
+Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, stop here. The node is still up.
 
 ```bash
 curl -fsS -o /tmp/migration_consensus.json https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus
 sudo cp /tmp/migration_consensus.json /opt/secret/.sgx_secrets/migration_consensus.json
+```
 
+Run this from the `mainnet` directory, and only after that file is on disk. `27286266` is the height in `upgrade-info.json`. On Ubuntu 24.04 use the `ubuntu-24.04` package instead of the one below. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
+
+```bash
+test -s /opt/secret/.sgx_secrets/migration_consensus.json || exit 1
 sudo systemctl stop secret-node
 
 export SCRT_SGX_STORAGE=/opt/secret/.sgx_secrets
-export EXTRA_HEIGHT=<height from upgrade-info.json>
+export EXTRA_HEIGHT=27286266
 
 find $SCRT_SGX_STORAGE -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
 
@@ -91,8 +96,12 @@ cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so
 secretd migrate_op 2
 echo "$EXTRA_HEIGHT" > $SCRT_SGX_STORAGE/halt_height
 ./check-hw --migrate_op 3
+```
 
-sudo dpkg -i ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
+After `check-hw --migrate_op 3` has finished, install the package and start the node. From the `mainnet` directory:
+
+```bash
+sudo dpkg -i ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
 sudo systemctl start secret-node
 ```
 
