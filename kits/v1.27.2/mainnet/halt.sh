@@ -9,7 +9,8 @@
 # SERVICE defaults to secret-node. Set SERVICE if the unit has another name.
 #
 # SECRETD_HOME, when set, is the node home: the directory that contains
-# data/upgrade-info.json. Unset, the four homes below are scanned in order.
+# data/upgrade-info.json. Unset, the four homes are checked. More than one
+# distinct file stops the script so you can set SECRETD_HOME.
 # SERVICE_UNIT_FILE, when set, is a backup of the systemd unit taken before
 # this script runs. The package postinst overwrites
 # /etc/systemd/system/secret-node.service. After dpkg that backup is copied to
@@ -23,7 +24,7 @@ for arg in "$@"; do
   case "$arg" in
     --install) DO_INSTALL=1 ;;
     --dry-run) DO_INSTALL=0 ;;
-    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) sed -n '2,18p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *unsafe-skip-upgrades*|upgrade-proposal-passed)
       echo "FATAL: refusing $arg" >&2; exit 1 ;;
     *) echo "unknown arg: $arg" >&2; exit 1 ;;
@@ -94,10 +95,11 @@ ENCLAVE_EXPECT_SHA256="$(sha256sum "$pkgdir/usr/lib/librust_cosmwasm_enclave.sig
 MRENCLAVE_EXPECT="$expect_h"
 HW_SO="$pkgdir/usr/lib/librust_cosmwasm_enclave.signed.so"
 
-# upgrade-info.json is written when the node halts. SECRETD_HOME replaces the scan.
+# upgrade-info.json is written when the node halts. One home is used.
+# Two distinct files stops here, before the node is stopped.
 read_upgrade_info() {
-  local f
-  local -a files
+  local f real seen
+  local -a files found
   if [[ -n "${SECRETD_HOME:-}" ]]; then
     files=("$SECRETD_HOME/data/upgrade-info.json")
   else
@@ -108,9 +110,25 @@ read_upgrade_info() {
       /opt/secret/.secretd/data/upgrade-info.json
     )
   fi
+  seen=" "
   for f in "${files[@]}"; do
     [[ -s "$f" ]] || continue
-    python3 - "$f" <<'PY'
+    real="$(readlink -f -- "$f" 2>/dev/null || printf '%s' "$f")"
+    case " $seen " in
+      *" $real "*) continue ;;
+    esac
+    seen="$seen$real "
+    found+=("$f")
+  done
+  if [[ "${#found[@]}" -gt 1 ]]; then
+    echo "FATAL: upgrade-info.json is in more than one home. Set SECRETD_HOME to one:" >&2
+    for f in "${found[@]}"; do
+      printf '  %s\n' "${f%/data/upgrade-info.json}" >&2
+    done
+    return 2
+  fi
+  [[ "${#found[@]}" -eq 1 ]] || return 1
+  python3 - "${found[0]}" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 plan = d.get("plan") or d
@@ -118,13 +136,14 @@ name = plan.get("name") or d.get("name") or ""
 height = plan.get("height") or d.get("height") or ""
 print(f"{name} {height}")
 PY
-    return 0
-  done
-  return 1
 }
 
 # Plan name must be v1.27.2. The height in the file is what the handover stamps.
-info="$(read_upgrade_info)" || die "node has no upgrade-info.json. Wait until it halts on the plan."
+info="$(read_upgrade_info)" && rc=0 || rc=$?
+if [[ "$rc" -eq 2 ]]; then
+  exit 1
+fi
+[[ "$rc" -eq 0 ]] || die "node has no upgrade-info.json. Wait until it halts on the plan."
 info_name="${info%% *}"
 info_height="${info##* }"
 [[ "$info_name" == "v1.27.2" ]] || die "upgrade-info name is $info_name (want v1.27.2)"

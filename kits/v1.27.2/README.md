@@ -40,12 +40,14 @@ Leave these unset. The command above already does the upgrade.
 
 **Node home**
 
-`SECRETD_HOME` is the directory that contains `data/upgrade-info.json`. The script already checks:
+`SECRETD_HOME` is the directory that contains `data/upgrade-info.json`. The script checks:
 
 - `$HOME/.secretd`
 - `/home/ubuntu/.secretd`
 - `/root/.secretd`
 - `/opt/secret/.secretd`
+
+If more than one of these has the file, the script stops and lists them. Set `SECRETD_HOME` to the home you want.
 
 ```bash
 cd mainnet && SECRETD_HOME=/home/secret/.secretd I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes ./autopilot.sh install
@@ -64,7 +66,7 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 The handover runs on `1.26.0`. The package is installed after the new sealed file exists.
 
 1. Confirm Ubuntu 22.04 or 24.04, and that the package enclave matches `H.txt`.
-2. Read `data/upgrade-info.json`. The plan name must be `v1.27.2`. That height is what the handover stamps.
+2. Read `data/upgrade-info.json`. The plan name must be `v1.27.2`. That height is what the handover stamps. If the file is in more than one home, set `SECRETD_HOME`.
 3. Confirm the systemd unit exists and has no `--bootstrap`.
 4. Confirm `/opt/secret/.sgx_secrets/migration_consensus.json` is already there. The script does not download it.
 5. Confirm `secretd` is `1.26.0`.
