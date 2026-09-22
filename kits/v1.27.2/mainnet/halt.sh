@@ -306,6 +306,10 @@ command -v secretd >/dev/null || die "secretd is not on PATH"
 oldv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$oldv" == "$FROM_VER" ]] || die "installed secretd is ${oldv:-empty} (want $FROM_VER)"
 
+# Copy the combined file before the stop. An unreadable file exits here.
+json_bak="$(mktemp)"
+cp -a "$SCRT_SGX_STORAGE/migration_consensus.json" "$json_bak"
+
 # Stop, then handover on the 1.26.0 binary, then install the package.
 # A failed stop exits before migrate_op. An already stopped unit still returns 0.
 sudo systemctl stop "$SERVICE"
@@ -314,8 +318,6 @@ sudo systemctl stop "$SERVICE"
 # sudo: those files are often owned by the service user. A failed delete exits.
 # An old migration_report_local.bin must not remain. check-hw 1 treats a
 # nonempty report as success when the Intel quote fails.
-json_bak="$(mktemp)"
-cp -a "$SCRT_SGX_STORAGE/migration_consensus.json" "$json_bak"
 sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
 if sudo test -e "$SCRT_SGX_STORAGE/migration_report_local.bin"; then
   die "migration_report_local.bin is still present after cleanup"
