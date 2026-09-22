@@ -69,11 +69,19 @@ Doing this by hand takes longer. Emergency signers who still need to coordinate 
 
 The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
 
-Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, stop here. The node is still up.
+Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, it prints the collector reply. `have` is how many signatures are in. `need` is 7. Stop here. The node is still up.
 
 ```bash
-curl -fsS -o /tmp/migration_consensus.json https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus
-sudo cp /tmp/migration_consensus.json /opt/secret/.sgx_secrets/migration_consensus.json
+rm -f /tmp/migration_consensus.json
+code=$(curl -sS -o /tmp/migration_consensus.json -w '%{http_code}' --max-time 20 https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus) || true
+if [ "$code" = 200 ]; then
+  sudo cp /tmp/migration_consensus.json /opt/secret/.sgx_secrets/migration_consensus.json
+else
+  echo "combined file is not ready (HTTP $code)"
+  cat /tmp/migration_consensus.json
+  echo
+  exit 1
+fi
 ```
 
 Run this from the `mainnet` directory, and only after that file is on disk. `27286266` is the height in `upgrade-info.json`. On Ubuntu 24.04 use the `ubuntu-24.04` package instead of the one below. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.

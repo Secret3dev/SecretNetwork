@@ -105,7 +105,16 @@ case "$CMD" in
       if [[ "$code" == "410" ]]; then
         die "upgrade $UPGRADE_ID is done. Combined file is no longer served."
       fi
-      echo "waiting for combined file (HTTP ${code:-none}). node is still up."
+      # 409 body is have/need. Do not copy it. The node stays up.
+      counts=""
+      if [[ "$code" == "409" ]]; then
+        counts="$(python3 -c 'import json; d=json.load(open("/tmp/migration_consensus.json")); print("have %s, need %s" % (d.get("have"), d.get("need")))' 2>/dev/null || true)"
+      fi
+      if [[ -n "$counts" ]]; then
+        echo "combined file is not ready ($counts). node is still up."
+      else
+        echo "waiting for combined file (HTTP ${code:-none}). node is still up."
+      fi
       sleep 15
     done
     sudo mkdir -p "$(dirname "$dest")"
