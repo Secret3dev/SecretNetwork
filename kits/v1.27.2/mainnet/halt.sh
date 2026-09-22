@@ -7,6 +7,14 @@
 #   I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes ./halt.sh --install
 #
 # SERVICE defaults to secret-node. Set SERVICE if the unit has another name.
+#
+# SECRETD_HOME, when set, is the node home: the directory that contains
+# data/upgrade-info.json. Unset, the four homes below are scanned in order.
+# SERVICE_UNIT_FILE, when set, is a backup of the systemd unit taken before
+# this script runs. The package postinst overwrites
+# /etc/systemd/system/secret-node.service. After dpkg that backup is copied to
+# /etc/systemd/system/$SERVICE.service, systemd is reloaded, and then the node
+# starts. Leave both unset and those steps do not run.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")" && pwd)"
@@ -15,7 +23,7 @@ for arg in "$@"; do
   case "$arg" in
     --install) DO_INSTALL=1 ;;
     --dry-run) DO_INSTALL=0 ;;
-    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    -h|--help) sed -n '2,17p' "$0" | sed 's/^# \?//'; exit 0 ;;
     *unsafe-skip-upgrades*|upgrade-proposal-passed)
       echo "FATAL: refusing $arg" >&2; exit 1 ;;
     *) echo "unknown arg: $arg" >&2; exit 1 ;;
@@ -48,6 +56,7 @@ fi
 [[ "$CHAIN_ID" == "secret-4" ]] || die "CHAIN_ID=$CHAIN_ID (want secret-4)"
 [[ "$UPGRADE_NAME" == "v1.27.2" ]] || die "UPGRADE_NAME=$UPGRADE_NAME (want v1.27.2)"
 
+# Package must match this Ubuntu release, and the enclave inside it must match H.txt.
 os_id="$(. /etc/os-release; printf '%s' "${VERSION_ID:-}")"
 case "$os_id" in
   22.04|24.04) ;;
@@ -85,14 +94,21 @@ ENCLAVE_EXPECT_SHA256="$(sha256sum "$pkgdir/usr/lib/librust_cosmwasm_enclave.sig
 MRENCLAVE_EXPECT="$expect_h"
 HW_SO="$pkgdir/usr/lib/librust_cosmwasm_enclave.signed.so"
 
+# upgrade-info.json is written when the node halts. SECRETD_HOME replaces the scan.
 read_upgrade_info() {
   local f
-  for f in \
-    "$HOME/.secretd/data/upgrade-info.json" \
-    /home/ubuntu/.secretd/data/upgrade-info.json \
-    /root/.secretd/data/upgrade-info.json \
-    /opt/secret/.secretd/data/upgrade-info.json
-  do
+  local -a files
+  if [[ -n "${SECRETD_HOME:-}" ]]; then
+    files=("$SECRETD_HOME/data/upgrade-info.json")
+  else
+    files=(
+      "$HOME/.secretd/data/upgrade-info.json"
+      /home/ubuntu/.secretd/data/upgrade-info.json
+      /root/.secretd/data/upgrade-info.json
+      /opt/secret/.secretd/data/upgrade-info.json
+    )
+  fi
+  for f in "${files[@]}"; do
     [[ -s "$f" ]] || continue
     python3 - "$f" <<'PY'
 import json, sys
@@ -107,6 +123,7 @@ PY
   return 1
 }
 
+# Plan name must be v1.27.2. The height in the file is what the handover stamps.
 info="$(read_upgrade_info)" || die "node has no upgrade-info.json. Wait until it halts on the plan."
 info_name="${info%% *}"
 info_height="${info##* }"
@@ -118,6 +135,7 @@ esac
 PLAN_HEIGHT="$info_height"
 EXTRA_HEIGHT="$info_height"
 
+# Unit that will be restarted. --bootstrap is genesis-only and must not be here.
 if systemctl cat "$SERVICE" >/dev/null 2>&1; then
   if systemctl show -p ExecStart "$SERVICE" | grep -q -- '--bootstrap'; then
     die "$SERVICE ExecStart still has --bootstrap"
@@ -126,6 +144,7 @@ else
   die "systemd unit $SERVICE not found. Set SERVICE to this node's unit name."
 fi
 
+# Signed handover file. This script does not download it.
 [[ -s "$SCRT_SGX_STORAGE/migration_consensus.json" ]] \
   || die "missing $SCRT_SGX_STORAGE/migration_consensus.json"
 
@@ -183,19 +202,27 @@ if [[ "$DO_INSTALL" -ne 1 ]]; then
   exit 0
 fi
 
+# Install stops the node. Both flags are required. Handover runs on 1.26.0.
 truthy_yes "${I_UNDERSTAND:-}" || die "set I_UNDERSTAND=yes for --install"
 truthy_yes "${I_CONFIRM_PRECHECK:-}" || die "set I_CONFIRM_PRECHECK=yes for --install"
+# A bad backup path stops here, before the node is stopped.
+if [[ -n "${SERVICE_UNIT_FILE:-}" ]]; then
+  [[ -s "$SERVICE_UNIT_FILE" ]] || die "SERVICE_UNIT_FILE is missing or empty: $SERVICE_UNIT_FILE"
+fi
 command -v secretd >/dev/null || die "secretd is not on PATH"
 oldv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$oldv" == "$FROM_VER" ]] || die "installed secretd is ${oldv:-empty} (want $FROM_VER)"
 
+# Stop, then handover on the 1.26.0 binary, then install the package.
 sudo systemctl stop "$SERVICE" || true
 
+# Keep migration_consensus.json. Remove every other migration_* file.
 json_bak="$(mktemp)"
 cp -a "$SCRT_SGX_STORAGE/migration_consensus.json" "$json_bak"
 find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete || true
 cp -a "$json_bak" "$SCRT_SGX_STORAGE/migration_consensus.json"
 
+# 5 self target info, check-hw 1 report, 2 export, stamp halt height, check-hw 3 import.
 export SCRT_SGX_STORAGE EXTRA_HEIGHT PLAN_HEIGHT
 secretd migrate_op 5
 run_check_hw 1
@@ -203,6 +230,7 @@ secretd migrate_op 2
 stamp_dest3
 run_check_hw 3
 
+# Do not install the package unless the new sealed file exists.
 [[ -s "$SCRT_SGX_STORAGE/data-${MRENCLAVE_EXPECT}.bin" ]] \
   || die "missing sealed data-${MRENCLAVE_EXPECT}.bin after the handover"
 
@@ -211,6 +239,18 @@ newv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$newv" == "1.27.2" ]] || die "package installed but secretd version is ${newv:-empty}"
 newmr="$(mrenclave_of "$ENCLAVE")"
 [[ "$newmr" == "$MRENCLAVE_EXPECT" ]] || die "installed enclave measurement $newmr != $MRENCLAVE_EXPECT"
+
+# postinst rewrites the unit. Put the operator backup back before start.
+if [[ -n "${SERVICE_UNIT_FILE:-}" ]]; then
+  sudo cp -a "$SERVICE_UNIT_FILE" "/etc/systemd/system/${SERVICE}.service"
+  sudo systemctl daemon-reload
+  if systemctl show -p ExecStart "$SERVICE" | grep -q -- '--bootstrap'; then
+    die "$SERVICE ExecStart still has --bootstrap"
+  fi
+  if systemctl show -p ExecStart "$SERVICE" | grep -q -- 'unsafe-skip-upgrades'; then
+    die "$SERVICE ExecStart has --unsafe-skip-upgrades"
+  fi
+fi
 
 sudo systemctl enable "$SERVICE"
 sudo systemctl start "$SERVICE"
