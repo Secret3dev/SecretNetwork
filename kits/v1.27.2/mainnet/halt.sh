@@ -66,6 +66,7 @@ case "$os_id" in
 esac
 DEB="${DEB:-$ROOT/ubuntu-${os_id}/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-${os_id}.deb}"
 [[ -s "$DEB" ]] || die "missing package $DEB"
+[[ -x "$CHECK_HW" ]] || die "missing $CHECK_HW"
 
 # Measurement is the 32 bytes at the SGX sigstruct offset. It must equal H.txt.
 mrenclave_of() {
@@ -156,6 +157,45 @@ esac
 PLAN_HEIGHT="$info_height"
 EXTRA_HEIGHT="$info_height"
 
+# check-hw 3 reads $HOME/.secretd, /root/.secretd, and /opt/secret/.secretd.
+# It does not read SECRETD_HOME. A different height in one of those exits here,
+# before the node is stopped. Unset SECRETD_HOME skips this.
+if [[ -n "${SECRETD_HOME:-}" ]]; then
+  hw_height="$(python3 - "$HOME" <<'PY'
+import json, os, sys
+home = sys.argv[1]
+paths = []
+if home:
+    paths.append(os.path.join(home, ".secretd/data/upgrade-info.json"))
+paths.extend([
+    "/root/.secretd/data/upgrade-info.json",
+    "/opt/secret/.secretd/data/upgrade-info.json",
+])
+seen = []
+for path in paths:
+    if path in seen:
+        continue
+    seen.append(path)
+    try:
+        data = json.load(open(path))
+    except Exception:
+        continue
+    height = data.get("height")
+    if isinstance(height, bool):
+        continue
+    if isinstance(height, int) and height > 0:
+        print(height)
+        raise SystemExit(0)
+    if isinstance(height, str) and height.isdigit() and int(height) > 0:
+        print(int(height))
+        raise SystemExit(0)
+PY
+)" || die "could not read the upgrade-info files check-hw uses"
+  if [[ -n "$hw_height" && "$hw_height" != "$PLAN_HEIGHT" ]]; then
+    die "check-hw would use upgrade-info height $hw_height, not $PLAN_HEIGHT from SECRETD_HOME"
+  fi
+fi
+
 # Unit that will be restarted. --bootstrap is genesis-only and must not be here.
 if systemctl cat "$SERVICE" >/dev/null 2>&1; then
   if systemctl show -p ExecStart "$SERVICE" | grep -q -- '--bootstrap'; then
@@ -240,7 +280,8 @@ oldv="$(secretd version 2>/dev/null | head -1 || true)"
 [[ "$oldv" == "$FROM_VER" ]] || die "installed secretd is ${oldv:-empty} (want $FROM_VER)"
 
 # Stop, then handover on the 1.26.0 binary, then install the package.
-sudo systemctl stop "$SERVICE" || true
+# A failed stop exits before migrate_op. An already stopped unit still returns 0.
+sudo systemctl stop "$SERVICE"
 
 # Keep migration_consensus.json. Remove every other migration_* file.
 json_bak="$(mktemp)"

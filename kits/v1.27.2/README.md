@@ -96,13 +96,13 @@ export EXTRA_HEIGHT=27286266
 
 find $SCRT_SGX_STORAGE -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
 
-secretd migrate_op 5
+secretd migrate_op 5 || exit 1
 
 dpkg-deb -x ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb /tmp/sn127
 cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so
 ./check-hw --migrate_op 1
-secretd migrate_op 2
-echo "$EXTRA_HEIGHT" > $SCRT_SGX_STORAGE/halt_height
+secretd migrate_op 2 || exit 1
+echo "$EXTRA_HEIGHT" > $SCRT_SGX_STORAGE/halt_height || exit 1
 ./check-hw --migrate_op 3 || exit 1
 
 sudo dpkg -i ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb || exit 1
@@ -111,6 +111,7 @@ sudo dpkg -i ../ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu
 If `dpkg` replaced a customized `/etc/systemd/system/secret-node.service`, copy your backup back and run `sudo systemctl daemon-reload` before start.
 
 ```bash
+test "$(secretd version | head -1)" = 1.27.2 || exit 1
 sudo systemctl start secret-node
 ```
 

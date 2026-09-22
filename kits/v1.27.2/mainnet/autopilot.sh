@@ -86,7 +86,14 @@ case "$CMD" in
     cat /tmp/upgrade-sig.out
     echo
     case "$code" in
-      200|409) ok "signature accepted or the list is already frozen" ;;
+      200) ok "signature accepted" ;;
+      409)
+        if grep -q "frozen" /tmp/upgrade-sig.out; then
+          ok "combined file is already frozen"
+        else
+          die "collector returned HTTP 409 $(cat /tmp/upgrade-sig.out)"
+        fi
+        ;;
       *) die "collector returned HTTP $code" ;;
     esac
     ;;
@@ -98,7 +105,10 @@ case "$CMD" in
     while true; do
       code="$(curl -sS -o /tmp/migration_consensus.json -w '%{http_code}' --max-time 20 "$url" || true)"
       if [[ "$code" == "200" ]]; then
-        python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and len(d) >= 1' /tmp/migration_consensus.json \
+        python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and d
+for k,v in d.items():
+    assert re.fullmatch(r"[0-9A-F]{40}", k)
+    assert isinstance(v, list) and len(v)==2 and all(isinstance(x, str) and x for x in v)' /tmp/migration_consensus.json \
           || die "collector returned a body that is not the combined file"
         break
       fi
