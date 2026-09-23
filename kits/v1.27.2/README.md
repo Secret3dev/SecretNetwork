@@ -67,19 +67,41 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
 Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above. Each block is a subshell. A failure stops that block and leaves the SSH session open.
 
-Get the binaries into this directory before the halt. Run this from `mainnet`. If a download fails, the block stops. The node is still up. These commands do not install the package. The last line checks the three mainnet files in `SHA256SUMS`. A missing file fails.
+Get the kit onto this machine. Run this from any directory. It writes `secret-4-v1.27.2/` with the scripts, the checksum file, and the mainnet binaries, then checks those three binaries. A failed download stops the block. The shell stays open. The node stays up.
 
 ```bash
 (
 set -e
-mkdir -p ubuntu-22.04 ubuntu-24.04 check-hw
-base=https://raw.githubusercontent.com/Secret3dev/SecretNetwork/secretcommunity-release-1/kits/v1.27.2/mainnet
-curl -fL --retry 3 -o ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb "$base/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb"
-curl -fL --retry 3 -o ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb "$base/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb"
-curl -fL --retry 3 -o check-hw/check-hw "$base/check-hw/check-hw"
-chmod +x check-hw/check-hw
-( cd .. && set -o pipefail && grep '  mainnet/' SHA256SUMS | sha256sum -c - )
+kit=secret-4-v1.27.2
+base=https://raw.githubusercontent.com/Secret3dev/SecretNetwork/secretcommunity-release-1/kits/v1.27.2
+mkdir -p "$kit/mainnet/ubuntu-22.04" "$kit/mainnet/ubuntu-24.04" "$kit/mainnet/check-hw" "$kit/mainnet/catalog" "$kit/testnet"
+fetch() { curl -fL --retry 3 -o "$kit/$1" "$base/$1"; }
+fetch SHA256SUMS
+fetch README.md
+fetch mainnet/H.txt
+fetch mainnet/SUBMIT.md
+fetch mainnet/proposal.json
+fetch mainnet/autopilot.sh
+fetch mainnet/halt.sh
+fetch mainnet/catalog/after.txt
+fetch mainnet/catalog/allowlist.txt
+fetch mainnet/catalog/meta.json
+fetch mainnet/catalog/removed.txt
+fetch mainnet/check-hw/check-hw
+fetch mainnet/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
+fetch mainnet/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb
+fetch testnet/H.txt
+fetch testnet/halt.sh
+fetch testnet/install.sh
+chmod +x "$kit/mainnet/autopilot.sh" "$kit/mainnet/halt.sh" "$kit/mainnet/check-hw/check-hw" "$kit/testnet/halt.sh" "$kit/testnet/install.sh"
+( cd "$kit" && set -o pipefail && grep '  mainnet/' SHA256SUMS | sha256sum -c - )
 )
+```
+
+Sign from that kit. This does not stop the node.
+
+```bash
+cd secret-4-v1.27.2/mainnet && ./autopilot.sh sign
 ```
 
 The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
