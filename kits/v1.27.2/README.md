@@ -65,18 +65,21 @@ The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
 ### By hand
 
-Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above.
+Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above. Each block is a subshell. A failure stops that block and leaves the SSH session open.
 
-Get the binaries into this directory before the halt. Run this from `mainnet`. If a download fails, stop. The node is still up. These commands do not install the package. The last line checks the three mainnet files in `SHA256SUMS`. A missing file fails.
+Get the binaries into this directory before the halt. Run this from `mainnet`. If a download fails, the block stops. The node is still up. These commands do not install the package. The last line checks the three mainnet files in `SHA256SUMS`. A missing file fails.
 
 ```bash
+(
+set -e
 mkdir -p ubuntu-22.04 ubuntu-24.04 check-hw
 base=https://raw.githubusercontent.com/Secret3dev/SecretNetwork/secretcommunity-release-1/kits/v1.27.2/mainnet
-curl -fL --retry 3 -o ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb "$base/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb" || exit 1
-curl -fL --retry 3 -o ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb "$base/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb" || exit 1
-curl -fL --retry 3 -o check-hw/check-hw "$base/check-hw/check-hw" || exit 1
+curl -fL --retry 3 -o ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb "$base/ubuntu-22.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb"
+curl -fL --retry 3 -o ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb "$base/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb"
+curl -fL --retry 3 -o check-hw/check-hw "$base/check-hw/check-hw"
 chmod +x check-hw/check-hw
-( cd .. && set -o pipefail && grep '  mainnet/' SHA256SUMS | sha256sum -c - ) || exit 1
+( cd .. && set -o pipefail && grep '  mainnet/' SHA256SUMS | sha256sum -c - )
+)
 ```
 
 The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.json`. Do not install the package until after `check-hw --migrate_op 3`.
@@ -84,6 +87,8 @@ The node has halted. `secretd` is `1.26.0`. Do not delete `migration_consensus.j
 Pull the combined file. The collector serves it once 7 signatures are in, and keeps serving it until this upgrade is marked done. If this fails, it prints the collector reply. `have` is how many signatures are in. `need` is 7. A 200 body that is not the address map is not copied. If the unit sets `SCRT_SGX_STORAGE`, export that same path before this block and before the handover. Stop here. The node is still up.
 
 ```bash
+(
+set -e
 export SCRT_SGX_STORAGE="${SCRT_SGX_STORAGE:-/opt/secret/.sgx_secrets}"
 rm -f /tmp/migration_consensus.json
 code=$(curl -sS -o /tmp/migration_consensus.json -w '%{http_code}' --max-time 20 https://upgrade.secret3.dev/v1/upgrades/secret-4-v1.27.2/consensus) || true
@@ -91,54 +96,61 @@ if [ "$code" = 200 ]; then
   python3 -c 'import json,re,sys; d=json.load(open(sys.argv[1])); assert isinstance(d, dict) and d
 for k,v in d.items():
     assert re.fullmatch(r"[0-9A-F]{40}", k)
-    assert isinstance(v, list) and len(v)==2 and all(isinstance(x, str) and x for x in v)' /tmp/migration_consensus.json || exit 1
+    assert isinstance(v, list) and len(v)==2 and all(isinstance(x, str) and x for x in v)' /tmp/migration_consensus.json
   sudo mkdir -p "$SCRT_SGX_STORAGE"
-  sudo cp /tmp/migration_consensus.json "$SCRT_SGX_STORAGE/migration_consensus.json" || exit 1
-  sudo chown "$(id -u):$(id -g)" "$SCRT_SGX_STORAGE/migration_consensus.json" || exit 1
+  sudo cp /tmp/migration_consensus.json "$SCRT_SGX_STORAGE/migration_consensus.json"
+  sudo chown "$(id -u):$(id -g)" "$SCRT_SGX_STORAGE/migration_consensus.json"
 else
   echo "combined file is not ready (HTTP $code)"
   cat /tmp/migration_consensus.json
   echo
-  exit 1
+  false
 fi
+)
 ```
 
 Run this from the `mainnet` directory, and only after that file is readable. `27286266` is the height in `upgrade-info.json`. The package follows this machine's Ubuntu version. `check-hw` has to be run from a directory that contains `check_hw_enclave.so`.
 
 ```bash
+(
+set -e
 export SCRT_SGX_STORAGE="${SCRT_SGX_STORAGE:-/opt/secret/.sgx_secrets}"
-test -r "$SCRT_SGX_STORAGE/migration_consensus.json" || exit 1
+test -r "$SCRT_SGX_STORAGE/migration_consensus.json"
 
 . /etc/os-release
-case "$VERSION_ID" in 22.04|24.04) ;; *) exit 1 ;; esac
+case "$VERSION_ID" in 22.04|24.04) ;; *) false ;; esac
 deb="ubuntu-${VERSION_ID}/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-${VERSION_ID}.deb"
-test -s "$deb" || exit 1
+test -s "$deb"
 
-cd check-hw || exit 1
-sudo systemctl stop secret-node || exit 1
+cd check-hw
+sudo systemctl stop secret-node
 
 export EXTRA_HEIGHT=27286266
 # Deletes other migration_* files. Leaves migration_consensus.json.
-sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete || exit 1
+sudo find "$SCRT_SGX_STORAGE" -maxdepth 1 -name 'migration_*' ! -name 'migration_consensus.json' -delete
 
-secretd migrate_op 5 || exit 1
+secretd migrate_op 5
 # Unpacks the package so the next line can copy the signed enclave. Does not install.
-dpkg-deb -x "../$deb" /tmp/sn127 || exit 1
-cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so || exit 1
+dpkg-deb -x "../$deb" /tmp/sn127
+cp /tmp/sn127/usr/lib/librust_cosmwasm_enclave.signed.so ./check_hw_enclave.so
 # Writes migration_report_local.bin. Stop if that file is missing. migrate_op 2 cannot export without it.
-./check-hw --migrate_op 1 || sudo test -s "$SCRT_SGX_STORAGE/migration_report_local.bin" || exit 1
-secretd migrate_op 2 || exit 1
-echo "$EXTRA_HEIGHT" > "$SCRT_SGX_STORAGE/halt_height" || exit 1
-./check-hw --migrate_op 3 || exit 1
+./check-hw --migrate_op 1 || sudo test -s "$SCRT_SGX_STORAGE/migration_report_local.bin"
+secretd migrate_op 2
+echo "$EXTRA_HEIGHT" > "$SCRT_SGX_STORAGE/halt_height"
+./check-hw --migrate_op 3
 # Installs the package. This line does not run when check-hw 3 fails.
-sudo dpkg -i "../$deb" || exit 1
+sudo dpkg -i "../$deb"
+)
 ```
 
 If `dpkg` replaced a customized unit, copy that backup back and run `sudo systemctl daemon-reload` before start.
 
 ```bash
-test "$(secretd version | head -1)" = 1.27.2 || exit 1
+(
+set -e
+test "$(secretd version | head -1)" = 1.27.2
 sudo systemctl start secret-node
+)
 ```
 
 The collector marks one upgrade `current` per network, by hand. `autopilot.sh` runs only when `secret-4-v1.27.2` is that current upgrade and the measurement matches this package. After the upgrade is marked `done`, the script exits and the collector stops serving the combined file. `testnet/halt.sh` exits the same way once `trinity-b-v1.27.0-r10` is marked done.
