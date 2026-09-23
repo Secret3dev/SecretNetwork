@@ -10,6 +10,7 @@ use cw_types_v010::encoding::Binary;
 use cw_types_v010::types::{CanonicalAddr, Coin, LogAttribute};
 use cw_types_v1::results::{Event, Reply, ReplyOn, SubMsg, SubMsgResponse, SubMsgResult};
 
+use enclave_cosmos_types::types::{HandleType, VerifyParamsType};
 use enclave_crypto::{AESKey, Ed25519PublicKey, Kdf, SIVEncryptable};
 use enclave_ffi_types::EnclaveError;
 use enclave_utils::KEY_MANAGER;
@@ -357,8 +358,22 @@ pub fn manipulate_callback_sig_for_plaintext(
                             msg,
                             funds,
                             ..
+                        } => {
+                            *callback_sig = Some(create_callback_signature(
+                                contract_addr,
+                                &msg.0,
+                                &funds
+                                    .iter()
+                                    .map(|coin| cw_types_v010::types::Coin {
+                                        denom: coin.denom.clone(),
+                                        amount: cw_types_v010::math::Uint128(coin.amount.u128()),
+                                    })
+                                    .collect::<Vec<cw_types_v010::types::Coin>>()[..],
+                                VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE)
+                                    .callback_op_tag(),
+                            ));
                         }
-                        | cw_types_v1::results::WasmMsg::Instantiate {
+                        cw_types_v1::results::WasmMsg::Instantiate {
                             callback_sig,
                             msg,
                             funds,
@@ -374,6 +389,7 @@ pub fn manipulate_callback_sig_for_plaintext(
                                         amount: cw_types_v010::math::Uint128(coin.amount.u128()),
                                     })
                                     .collect::<Vec<cw_types_v010::types::Coin>>()[..],
+                                VerifyParamsType::Init.callback_op_tag(),
                             ));
                         }
                         cw_types_v1::results::WasmMsg::Migrate {
@@ -383,12 +399,17 @@ pub fn manipulate_callback_sig_for_plaintext(
                                 contract_addr,
                                 &msg.as_slice().to_vec(),
                                 &[],
+                                VerifyParamsType::Migrate.callback_op_tag(),
                             ));
                         }
                         cw_types_v1::results::WasmMsg::ClearAdmin { callback_sig, .. }
                         | cw_types_v1::results::WasmMsg::UpdateAdmin { callback_sig, .. } => {
-                            *callback_sig =
-                                Some(create_callback_signature(contract_addr, &vec![], &[]));
+                            *callback_sig = Some(create_callback_signature(
+                                contract_addr,
+                                &vec![],
+                                &[],
+                                VerifyParamsType::UpdateAdmin.callback_op_tag(),
+                            ));
                         }
                     }
                 }
@@ -399,12 +420,6 @@ pub fn manipulate_callback_sig_for_plaintext(
                 if let cw_types_v1::results::CosmosMsg::Wasm(wasm_msg) = &mut sub_msg.msg {
                     match wasm_msg {
                         cw_types_v1::results::WasmMsg::Execute {
-                            callback_sig,
-                            msg,
-                            funds,
-                            ..
-                        }
-                        | cw_types_v1::results::WasmMsg::Instantiate {
                             callback_sig,
                             msg,
                             funds,
@@ -420,6 +435,27 @@ pub fn manipulate_callback_sig_for_plaintext(
                                         amount: cw_types_v010::math::Uint128(coin.amount.u128()),
                                     })
                                     .collect::<Vec<Coin>>()[..],
+                                VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE)
+                                    .callback_op_tag(),
+                            ));
+                        }
+                        cw_types_v1::results::WasmMsg::Instantiate {
+                            callback_sig,
+                            msg,
+                            funds,
+                            ..
+                        } => {
+                            *callback_sig = Some(create_callback_signature(
+                                contract_addr,
+                                &msg.as_slice().to_vec(),
+                                &funds
+                                    .iter()
+                                    .map(|coin| Coin {
+                                        denom: coin.denom.clone(),
+                                        amount: cw_types_v010::math::Uint128(coin.amount.u128()),
+                                    })
+                                    .collect::<Vec<Coin>>()[..],
+                                VerifyParamsType::Init.callback_op_tag(),
                             ));
                         }
                         cw_types_v1::results::WasmMsg::Migrate {
@@ -429,12 +465,17 @@ pub fn manipulate_callback_sig_for_plaintext(
                                 contract_addr,
                                 &msg.as_slice().to_vec(),
                                 &[],
+                                VerifyParamsType::Migrate.callback_op_tag(),
                             ));
                         }
                         cw_types_v1::results::WasmMsg::ClearAdmin { callback_sig, .. }
                         | cw_types_v1::results::WasmMsg::UpdateAdmin { callback_sig, .. } => {
-                            *callback_sig =
-                                Some(create_callback_signature(contract_addr, &vec![], &[]));
+                            *callback_sig = Some(create_callback_signature(
+                                contract_addr,
+                                &vec![],
+                                &[],
+                                VerifyParamsType::UpdateAdmin.callback_op_tag(),
+                            ));
                         }
                     }
                 }
@@ -719,8 +760,22 @@ fn create_callback_sig_for_submsgs(
                     callback_sig,
                     funds,
                     ..
+                } => {
+                    *callback_sig = Some(create_callback_signature(
+                        contract_addr,
+                        &SecretMessage::from_slice(msg.as_slice())?.msg,
+                        &funds
+                            .iter()
+                            .map(|coin| Coin {
+                                denom: coin.denom.clone(),
+                                amount: cw_types_v010::math::Uint128(coin.amount.u128()),
+                            })
+                            .collect::<Vec<Coin>>()[..],
+                        VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE)
+                            .callback_op_tag(),
+                    ));
                 }
-                | cw_types_v1::results::WasmMsg::Instantiate {
+                cw_types_v1::results::WasmMsg::Instantiate {
                     msg,
                     callback_sig,
                     funds,
@@ -736,6 +791,7 @@ fn create_callback_sig_for_submsgs(
                                 amount: cw_types_v010::math::Uint128(coin.amount.u128()),
                             })
                             .collect::<Vec<Coin>>()[..],
+                        VerifyParamsType::Init.callback_op_tag(),
                     ));
                 }
                 cw_types_v1::results::WasmMsg::Migrate {
@@ -745,11 +801,17 @@ fn create_callback_sig_for_submsgs(
                         contract_addr,
                         &SecretMessage::from_slice(msg.as_slice())?.msg,
                         &[],
+                        VerifyParamsType::Migrate.callback_op_tag(),
                     ));
                 }
                 cw_types_v1::results::WasmMsg::ClearAdmin { callback_sig, .. }
                 | cw_types_v1::results::WasmMsg::UpdateAdmin { callback_sig, .. } => {
-                    *callback_sig = Some(create_callback_signature(contract_addr, &vec![], &[]));
+                    *callback_sig = Some(create_callback_signature(
+                        contract_addr,
+                        &vec![],
+                        &[],
+                        VerifyParamsType::UpdateAdmin.callback_op_tag(),
+                    ));
                 }
             }
         }
@@ -880,7 +942,15 @@ fn get_reply_info_for_output(
         EnclaveError::FailedToSerialize
     })?;
 
-    let sig = Binary::from(create_callback_signature(sender_addr, &reply_json, &[]).as_slice());
+    let sig = Binary::from(
+        create_callback_signature(
+            sender_addr,
+            &reply_json,
+            &[],
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_REPLY).callback_op_tag(),
+        )
+        .as_slice(),
+    );
 
     trace!(
         "Generated internal callback signature for msg {:?} signature is: {:?}",
@@ -904,8 +974,27 @@ fn encrypt_v010_wasm_msg(
             callback_sig,
             send,
             ..
+        } => {
+            let mut hash_appended_msg = callback_code_hash.as_bytes().to_vec();
+            hash_appended_msg.extend_from_slice(msg.as_slice());
+
+            let mut msg_to_pass = SecretMessage::from_base64(
+                Binary(hash_appended_msg).to_base64(),
+                nonce,
+                user_public_key,
+            )?;
+
+            msg_to_pass.encrypt_in_place()?;
+            *msg = Binary::from(msg_to_pass.to_vec().as_slice());
+
+            *callback_sig = Some(create_callback_signature(
+                contract_addr,
+                &msg_to_pass.msg,
+                send,
+                VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE).callback_op_tag(),
+            ));
         }
-        | cw_types_v010::types::WasmMsg::Instantiate {
+        cw_types_v010::types::WasmMsg::Instantiate {
             msg,
             callback_code_hash,
             callback_sig,
@@ -928,6 +1017,7 @@ fn encrypt_v010_wasm_msg(
                 contract_addr,
                 &msg_to_pass.msg,
                 send,
+                VerifyParamsType::Init.callback_op_tag(),
             ));
         }
         cw_types_v010::types::WasmMsg::Migrate {
@@ -952,6 +1042,7 @@ fn encrypt_v010_wasm_msg(
                 contract_addr,
                 &msg_to_pass.msg,
                 &[],
+                VerifyParamsType::Migrate.callback_op_tag(),
             ));
         }
         cw_types_v010::types::WasmMsg::UpdateAdmin { callback_sig, .. }
@@ -960,6 +1051,7 @@ fn encrypt_v010_wasm_msg(
                 contract_addr,
                 &vec![], /* must be empty vec for callback_sig verification */
                 &[],
+                VerifyParamsType::UpdateAdmin.callback_op_tag(),
             ));
         }
     }
@@ -1017,14 +1109,16 @@ pub fn create_callback_signature(
     _sender: &CanonicalAddr,
     msg_to_pass: &Vec<u8>,
     sent_funds: &[Coin],
+    op_tag: &[u8],
 ) -> Vec<u8> {
-    // sha256(enclave_secret | msg_to_pass | sent_funds)
+    // sha256(enclave_secret | op_tag | msg_to_pass | sent_funds)
     let mut callback_sig_bytes = KEY_MANAGER
         .get_consensus_callback_secret()
         .unwrap()
         .get()
         .to_vec();
 
+    callback_sig_bytes.extend(op_tag);
     callback_sig_bytes.extend(msg_to_pass.as_slice());
     callback_sig_bytes.extend(serde_json::to_vec(sent_funds).unwrap());
 

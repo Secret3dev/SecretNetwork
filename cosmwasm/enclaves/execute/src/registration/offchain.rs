@@ -8,14 +8,13 @@ use block_verifier::validator_whitelist;
 use core::convert::TryInto;
 use ed25519_dalek::{PublicKey, Signature};
 use enclave_crypto::consts::{
-    make_sgx_secret_path, FILE_CERT_COMBINED, FILE_MIGRATION_CERT_LOCAL,
+    make_sgx_secret_path, FILE_CERT_COMBINED, FILE_HALT_APPHASH, FILE_HALT_ER, FILE_HALT_HEIGHT,
+    FILE_HALT_PROOF, FILE_MIGRATION_CERT_LOCAL,
     FILE_MIGRATION_CERT_REMOTE, FILE_MIGRATION_CONSENSUS, FILE_MIGRATION_DATA,
-    FILE_MIGRATION_TARGET_INFO, FILE_PUBKEY,
+    FILE_MIGRATION_TARGET_INFO, FILE_PUBKEY, SELF_REPORT_BODY,
 };
 #[cfg(feature = "random")]
-use enclave_crypto::{
-    consts::SELF_REPORT_BODY, AESKey, Ed25519PublicKey, KeyPair, SIVEncryptable, PUBLIC_KEY_SIZE,
-};
+use enclave_crypto::{AESKey, Ed25519PublicKey, KeyPair, SIVEncryptable, PUBLIC_KEY_SIZE};
 use enclave_ffi_types::SINGLE_ENCRYPTED_SEED_SIZE;
 use enclave_utils::key_manager::KeychainMutableData;
 use enclave_utils::pointers::validate_mut_slice;
@@ -29,7 +28,7 @@ use log::*;
 use sgx_trts::trts::rsgx_read_rand;
 use sgx_tse::{rsgx_create_report, rsgx_verify_report};
 use sgx_types::{
-    sgx_measurement_t, sgx_report_body_t, sgx_report_t, sgx_status_t, sgx_target_info_t, SgxResult,
+    sgx_report_body_t, sgx_report_t, sgx_status_t, sgx_target_info_t, SgxResult,
 };
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -291,6 +290,65 @@ pub unsafe fn get_attestation_report_dcap(
     Ok(attestation)
 }
 
+fn mrsigner_allowed(body: &sgx_report_body_t) -> bool {
+    #[cfg(not(feature = "SGX_MODE_HW"))]
+    {
+        let _ = body;
+        true
+    }
+    #[cfg(feature = "SGX_MODE_HW")]
+    {
+        body.mr_signer.m == SELF_REPORT_BODY.mr_signer.m
+    }
+}
+
+fn target_info_from_report_body(body: &sgx_report_body_t) -> sgx_target_info_t {
+    let mut ti = sgx_target_info_t::default();
+    ti.mr_enclave = body.mr_enclave;
+    ti.attributes = body.attributes;
+    ti.config_svn = body.config_svn;
+    ti.misc_select = body.misc_select;
+    ti.config_id = body.config_id;
+    ti
+}
+
+fn create_source_report_for_dest(dest_body: &sgx_report_body_t) -> SgxResult<sgx_report_t> {
+    let target_info = target_info_from_report_body(dest_body);
+    let mut report_data = sgx_types::sgx_report_data_t::default();
+    report_data.d[..32].copy_from_slice(&Keychain::get_migration_keys().get_pubkey());
+    rsgx_create_report(&target_info, &report_data)
+}
+
+fn dest_op1_report_is_self() -> bool {
+    // The local report must be for this enclave. A report for another measurement is rejected.
+    let mut f_in = match File::open(make_sgx_secret_path(FILE_MIGRATION_CERT_LOCAL)) {
+        Ok(f) => f,
+        Err(_) => return false,
+    };
+    let mut buffer = vec![0u8; std::mem::size_of::<sgx_report_t>()];
+    if f_in.read_exact(&mut buffer).is_err() {
+        return false;
+    }
+    let report: sgx_report_t =
+        unsafe { std::ptr::read(buffer.as_ptr() as *const sgx_report_t) };
+    let body = report.body;
+    if body.mr_enclave.m != SELF_REPORT_BODY.mr_enclave.m {
+        error!("import local report MRENCLAVE is not self");
+        return false;
+    }
+    if !mrsigner_allowed(&body) {
+        error!("import local report MRSIGNER not allowed");
+        return false;
+    }
+    let pk = Keychain::get_migration_keys().get_pubkey();
+    let rd = body.report_data;
+    if rd.d[..32] != pk {
+        error!("import local report pubkey is not dest migration key");
+        return false;
+    }
+    true
+}
+
 fn get_verified_migration_report_body(check_ppid_wl: bool) -> SgxResult<sgx_report_body_t> {
     if let Ok(mut f_in) = File::open(make_sgx_secret_path(FILE_MIGRATION_CERT_LOCAL)) {
         let mut buffer = vec![0u8; std::mem::size_of::<sgx_report_t>()];
@@ -301,6 +359,10 @@ fn get_verified_migration_report_body(check_ppid_wl: bool) -> SgxResult<sgx_repo
 
             match rsgx_verify_report(&report) {
                 Ok(()) => {
+                    if !mrsigner_allowed(&report.body) {
+                        error!("local migration report MRSIGNER not allowed");
+                        return Err(sgx_status_t::SGX_ERROR_NO_PRIVILEGE);
+                    }
                     return Ok(report.body);
                 }
                 Err(e) => {
@@ -310,22 +372,10 @@ fn get_verified_migration_report_body(check_ppid_wl: bool) -> SgxResult<sgx_repo
         }
     }
 
-    if let Ok(mut f_in) = File::open(make_sgx_secret_path(FILE_MIGRATION_CERT_REMOTE)) {
-        println!("Found remote migration report");
-
-        let mut cert = vec![];
-        f_in.read_to_end(&mut cert).unwrap();
-
-        let attestation = AttestationCombined::from_blob(cert.as_ptr(), cert.len());
-
-        match verify_quote_sgx(&attestation, 0, check_ppid_wl) {
-            Ok(res) => {
-                return Ok(res.body);
-            }
-            Err(e) => {
-                error!("Can't verify remote quote: {}", e);
-            }
-        }
+    if File::open(make_sgx_secret_path(FILE_MIGRATION_CERT_REMOTE)).is_ok() {
+        let _ = check_ppid_wl;
+        // A remote migration quote is not accepted. Migration uses the local report.
+        error!("remote migration quote refused: DCAP time_s=0 forbidden; use local report");
     }
 
     Err(sgx_status_t::SGX_ERROR_NO_PRIVILEGE)
@@ -476,51 +526,15 @@ pub unsafe extern "C" fn ecall_get_genesis_seed(
         seed.len(),
         sgx_status_t::SGX_ERROR_UNEXPECTED
     );
-
-    let pk_slice = std::slice::from_raw_parts(pk, pk_len as usize);
-
-    let result = panic::catch_unwind(|| -> Result<Vec<u8>, sgx_types::sgx_status_t> {
-        // just make sure the length isn't wrong for some reason (certificate may be malformed)
-        if pk_slice.len() != PUBLIC_KEY_SIZE {
-            warn!(
-                "Got public key from certificate with the wrong size: {:?}",
-                pk_slice.len()
-            );
-            return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
-        }
-
-        let mut target_public_key: [u8; 32] = [0u8; 32];
-        target_public_key.copy_from_slice(pk_slice);
-        trace!(
-            "ecall_get_encrypted_genesis_seed target_public_key key pk: {:?}",
-            &target_public_key.to_vec()
-        );
-
-        let seeds = KEY_MANAGER.get_consensus_seed().unwrap();
-        let res: Vec<u8> = encrypt_seed(&target_public_key, &seeds.arr[0], true)
-            .map_err(|_| sgx_status_t::SGX_ERROR_UNEXPECTED)?;
-
-        Ok(res)
-    });
-
-    if let Ok(res) = result {
-        match res {
-            Ok(res) => {
-                trace!("Done encrypting seed, got {:?}, {:?}", res.len(), res);
-
-                seed.copy_from_slice(&res);
-                trace!("returning with seed: {:?}, {:?}", seed.len(), seed);
-                sgx_status_t::SGX_SUCCESS
-            }
-            Err(e) => {
-                trace!("error encrypting seed {:?}", e);
-                e
-            }
-        }
-    } else {
-        warn!("Enclave call ecall_get_genesis_seed panic!");
-        sgx_status_t::SGX_ERROR_UNEXPECTED
+    if pk_len != 0 {
+        validate_const_ptr!(pk, pk_len as usize, sgx_status_t::SGX_ERROR_UNEXPECTED);
     }
+
+    // Public ecall must not return genesis consensus seed[0] without
+    // attestation+export policy. This ABI has no attestation; empty/error, not seeds.
+    seed.fill(0);
+    warn!("ecall_get_genesis_seed refused: attestation+export policy required");
+    sgx_status_t::SGX_ERROR_ECALL_NOT_ALLOWED
 }
 
 #[no_mangle]
@@ -623,8 +637,7 @@ pub unsafe extern "C" fn ecall_migration_op(opcode: u32) -> sgx_types::sgx_statu
 fn is_msg_mrenclave(msg_in_block: &[u8], mrenclave: &[u8]) -> bool {
     trace!("*** block msg: {:?}", hex::encode(msg_in_block));
 
-    // we expect a message of the form:
-    // 0a 2d (addr, len=45 bytes) 12 20 (mrenclave 32 bytes)
+    // The message is a fixed-length protobuf value containing the measurement.
 
     if msg_in_block.len() != 81 {
         trace!("len mismatch: {}", msg_in_block.len());
@@ -665,7 +678,7 @@ fn check_mrenclave_in_block(msg_slice: &[u8]) -> bool {
 
 #[cfg(not(feature = "light-client-validation"))]
 fn check_mrenclave_in_block(_msg_slice: &[u8]) -> bool {
-    true
+    false
 }
 
 #[no_mangle]
@@ -686,16 +699,9 @@ pub unsafe extern "C" fn ecall_onchain_approve_upgrade(
         return sgx_types::sgx_status_t::SGX_ERROR_UNEXPECTED;
     }
 
-    {
-        let mut extra = KEY_MANAGER.extra_data.lock().unwrap();
-        extra.next_mr_enclave = Some(sgx_measurement_t {
-            m: msg_slice.try_into().unwrap(),
-        });
-    }
-    KEY_MANAGER.save();
-
+    // The call is accepted after the block check. It does not store the measurement.
     info!(
-        "Migration target approved. mr_encalve={}",
+        "ecall_onchain_approve_upgrade: no-write. mr_enclave={} ignored",
         hex::encode(msg_slice)
     );
 
@@ -757,10 +763,7 @@ fn is_msg_machine_id(msg_in_block: &[u8], machine_id: &[u8]) -> bool {
     trace!("*** block msg: {}", hex::encode(msg_in_block));
     //trace!("*** target: {}", hex::encode(machine_id));
 
-    // we expect a message of the form:
-    // 0a 2d (addr, len=45 bytes)
-    // 10 (proposal-id, varible length)
-    // 1a size (machine_ids)
+    // The message is a protobuf value containing the proposal id and machine ids.
 
     let mut r = ProtobufParser {
         cursor: msg_in_block,
@@ -792,6 +795,10 @@ fn is_msg_machine_id(msg_in_block: &[u8], machine_id: &[u8]) -> bool {
     }
 
     if let Some(x) = r.read_uint() {
+        if x > r.cursor.len() {
+            trace!("malformed field");
+            return false;
+        }
         r.cursor = &r.cursor[0..x];
     } else {
         trace!("wrong sub6");
@@ -821,6 +828,14 @@ fn is_msg_machine_id(msg_in_block: &[u8], machine_id: &[u8]) -> bool {
     false
 }
 
+#[cfg(feature = "test")]
+pub fn test_is_msg_machine_id_malformed_len_returns_false() {
+    let mut msg = vec![0x0a, 0x2d];
+    msg.extend_from_slice(&[0u8; 45]);
+    msg.extend_from_slice(&[0x10, 0x01, 0x1a, 0x7f]);
+    assert!(!is_msg_machine_id(&msg, b"machine"));
+}
+
 #[cfg(feature = "light-client-validation")]
 fn check_machine_id_in_block(msg_slice: &[u8]) -> bool {
     let mut verified_msgs = VERIFIED_BLOCK_MESSAGES.lock().unwrap();
@@ -839,7 +854,7 @@ fn check_machine_id_in_block(msg_slice: &[u8]) -> bool {
 
 #[cfg(not(feature = "light-client-validation"))]
 fn check_machine_id_in_block(_msg_slice: &[u8]) -> bool {
-    true
+    false
 }
 
 #[no_mangle]
@@ -1233,18 +1248,8 @@ fn is_export_approved_offchain(f_in: File, report: &sgx_report_body_t) -> bool {
 }
 
 fn is_export_approved(report: &sgx_report_body_t) -> bool {
-    // Current policy: we only check mr_enclave, mr_signer can be anything
-
-    {
-        let extra = KEY_MANAGER.extra_data.lock().unwrap();
-        if let Some(val) = extra.next_mr_enclave {
-            if val.m == report.mr_enclave.m {
-                println!("Migration is authorized by on-chain consensus.");
-                return true;
-            }
-        }
-    }
-
+    // Export is approved only from the emergency consensus file.
+    let _ = report;
     if let Ok(f_in) = File::open(make_sgx_secret_path(FILE_MIGRATION_CONSENSUS).as_str()) {
         if is_export_approved_offchain(f_in, report) {
             println!("Migration is authorized by off-chain (emergency) consensus");
@@ -1383,6 +1388,15 @@ fn export_rot_seed() -> sgx_status_t {
         }
         Err(e) => return e,
     };
+
+    let next_report = match get_seed_rot_report() {
+        Ok(r) => r,
+        Err(e) => return e,
+    };
+    if !is_export_approved(&next_report) {
+        error!("Export rotation seed not authorized");
+        return sgx_status_t::SGX_ERROR_NO_PRIVILEGE;
+    }
 
     let aes_key = match get_dh_aes_key_from_rot_report() {
         Ok(k) => k,
@@ -1546,7 +1560,16 @@ fn export_sealed_data() -> sgx_status_t {
         return sgx_status_t::SGX_ERROR_NO_PRIVILEGE;
     }
 
-    let kp = KeyPair::new().unwrap();
+    // Build a source report addressed to the next enclave.
+    let source_report = match create_source_report_for_dest(&next_report) {
+        Ok(r) => r,
+        Err(e) => {
+            error!("source migration report for dest failed: {}", e);
+            return e;
+        }
+    };
+
+    let kp = Keychain::get_migration_keys();
     let aes_key = get_dh_aes_key_from_report(&next_report, &kp);
 
     let mut data_plain = Vec::new();
@@ -1562,32 +1585,170 @@ fn export_sealed_data() -> sgx_status_t {
         }
     };
 
-    f_out.write_all(&kp.get_pubkey()).unwrap();
-    f_out.write_all(&data_encrypted).unwrap();
+    let report_ptr = &source_report as *const sgx_report_t as *const u8;
+    let report_size = std::mem::size_of::<sgx_report_t>();
+    let report_bytes: &[u8] = unsafe { slice::from_raw_parts(report_ptr, report_size) };
+    if f_out.write_all(report_bytes).is_err() || f_out.write_all(&data_encrypted).is_err() {
+        error!("failed to write migration blob");
+        return sgx_status_t::SGX_ERROR_UNEXPECTED;
+    }
 
     println!("Sealed data successfully exported");
     sgx_status_t::SGX_SUCCESS
 }
 
-fn import_sealed_data() -> sgx_status_t {
-    let mut f_in = match File::open(make_sgx_secret_path(FILE_MIGRATION_DATA)) {
-        Ok(f) => f,
-        Err(e) => {
-            error!("failed to open file {}", e);
+fn parse_u64_nonzero(s: &str) -> Option<u64> {
+    let n = s.trim().parse::<u64>().ok()?;
+    if n == 0 {
+        None
+    } else {
+        Some(n)
+    }
+}
+
+fn parse_upgrade_info_height(bytes: &[u8]) -> Option<u64> {
+    let v: serde_json::Value = serde_json::from_slice(bytes).ok()?;
+    let h = v.get("height")?;
+    if let Some(n) = h.as_u64() {
+        if n == 0 {
+            return None;
+        }
+        return Some(n);
+    }
+    if let Some(s) = h.as_str() {
+        return parse_u64_nonzero(s);
+    }
+    None
+}
+
+/// Reads the halt height from the halt-height file, EXTRA_HEIGHT, or upgrade-info.json.
+fn read_halt_height() -> Option<u64> {
+    if let Ok(mut f) = File::open(make_sgx_secret_path(FILE_HALT_HEIGHT)) {
+        let mut s = String::new();
+        if f.read_to_string(&mut s).is_ok() {
+            if let Some(h) = parse_u64_nonzero(&s) {
+                return Some(h);
+            }
+        }
+    }
+    if let Ok(s) = std::env::var("EXTRA_HEIGHT") {
+        if let Some(h) = parse_u64_nonzero(&s) {
+            return Some(h);
+        }
+    }
+    let mut paths: Vec<String> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        paths.push(format!("{}/.secretd/data/upgrade-info.json", home));
+    }
+    paths.push("/root/.secretd/data/upgrade-info.json".to_string());
+    paths.push("/opt/secret/.secretd/data/upgrade-info.json".to_string());
+    for path in paths {
+        if let Ok(mut f) = File::open(&path) {
+            let mut buf = Vec::new();
+            if f.read_to_end(&mut buf).is_ok() {
+                if let Some(h) = parse_upgrade_info_height(&buf) {
+                    return Some(h);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// When the optional halt proof files are present, check them against each imported seed.
+/// Prints `{label}=N` or `{label}=none`. Does not print key bytes.
+fn probe_halt_hmac_seeds(key_manager: &Keychain, label: &str) {
+    let er = match read_exact_secret_file(FILE_HALT_ER, 48) {
+        Some(v) => v,
+        None => return,
+    };
+    let proof = match read_exact_secret_file(FILE_HALT_PROOF, 32) {
+        Some(v) => v,
+        None => return,
+    };
+    let apphash = match read_exact_secret_file(FILE_HALT_APPHASH, 32) {
+        Some(v) => v,
+        None => return,
+    };
+    let height = match read_halt_height() {
+        Some(h) => h,
+        None => return,
+    };
+    let seeds = match key_manager.get_consensus_seed() {
+        Ok(s) => s,
+        Err(_) => {
+            println!("import_sealed_data: {}=none", label);
+            return;
+        }
+    };
+    let mut proof_arr = [0u8; 32];
+    proof_arr.copy_from_slice(&proof);
+    for i in 0..seeds.arr.len() {
+        let irs = Keychain::generate_randomness_seed(&seeds.arr[i]);
+        let got = enclave_utils::random::create_random_proof_v126(&irs, height, &er, &apphash);
+        if got == proof_arr {
+            println!("import_sealed_data: {}={}", label, i);
+            return;
+        }
+    }
+    println!("import_sealed_data: {}=none", label);
+}
+
+fn read_exact_secret_file(name: &str, want: usize) -> Option<Vec<u8>> {
+    let path = make_sgx_secret_path(name);
+    let mut f = File::open(&path).ok()?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf).ok()?;
+    if buf.len() == want {
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+fn apply_hstar_on_import(key_manager: &Keychain) -> sgx_status_t {
+    let mut extra = key_manager.extra_data.lock().unwrap();
+    if extra.height == 0 {
+        error!("import_sealed_data: extra.height==0 (failed import)");
+        return sgx_status_t::SGX_ERROR_UNEXPECTED;
+    }
+    // If the height gate is already set, keep it.
+    if extra.random_proof_hstar != 0 {
+        println!(
+            "import_sealed_data: stamped random_proof_hstar={} (already set; extra.height={})",
+            extra.random_proof_hstar, extra.height
+        );
+        return sgx_status_t::SGX_SUCCESS;
+    }
+    let halt_height = match read_halt_height() {
+        Some(h) => h,
+        None => {
+            error!(
+                "import_sealed_data: dest-3 needs halt_height = plan.Height (migrate_op 3 arg / EXTRA_HEIGHT / halt_height file / upgrade-info.json); never extra.height, never H+1"
+            );
             return sgx_status_t::SGX_ERROR_UNEXPECTED;
         }
     };
+    if extra.height != halt_height && extra.height != halt_height + 1 {
+        error!(
+            "import_sealed_data: extra.height={} not in {{halt={}, halt+1}}",
+            extra.height, halt_height
+        );
+        return sgx_status_t::SGX_ERROR_UNEXPECTED;
+    }
+    extra.random_proof_hstar = halt_height;
+    println!(
+        "import_sealed_data: stamped random_proof_hstar={} (extra.height={})",
+        halt_height, extra.height
+    );
+    sgx_status_t::SGX_SUCCESS
+}
 
-    let mut other_pub_k: Ed25519PublicKey = Ed25519PublicKey::default();
-    f_in.read_exact(&mut other_pub_k).unwrap();
-
-    let mut data_encrypted = Vec::new();
-    f_in.read_to_end(&mut data_encrypted).unwrap();
-
+fn import_keychain_from_peer(source_pk: &Ed25519PublicKey, data_encrypted: &[u8]) -> sgx_status_t {
     let kp = Keychain::get_migration_keys();
-    let aes_key = AESKey::new_from_slice(&kp.diffie_hellman(&other_pub_k));
+    let aes_key = AESKey::new_from_slice(&kp.diffie_hellman(source_pk));
 
-    let data_plain = match aes_key.decrypt_siv(&data_encrypted, None) {
+    let data_plain = match aes_key.decrypt_siv(data_encrypted, None) {
         Ok(res) => res,
         Err(err) => {
             error!("Can't decrypt sealing key: {}", err);
@@ -1599,7 +1760,25 @@ fn import_sealed_data() -> sgx_status_t {
 
     match key_manager.deserialize(&mut std::io::Cursor::new(data_plain)) {
         Ok(_) => {
+            let n = key_manager
+                .get_consensus_seed()
+                .map(|s| s.arr.len())
+                .unwrap_or(0);
+            {
+                let extra = key_manager.extra_data.lock().unwrap();
+                println!(
+                    "import_sealed_data: imported consensus_seeds={} last_block_seed={} extra.height={}",
+                    n, extra.last_block_seed, extra.height
+                );
+            }
+            probe_halt_hmac_seeds(&key_manager, "halt_hmac_seed");
+            let st = apply_hstar_on_import(&key_manager);
+            if st != sgx_status_t::SGX_SUCCESS {
+                return st;
+            }
             key_manager.save();
+            let loaded = Keychain::new();
+            probe_halt_hmac_seeds(&loaded, "halt_hmac_seed_after_load");
             info!("Sealing data successfully imported");
             sgx_status_t::SGX_SUCCESS
         }
@@ -1608,6 +1787,52 @@ fn import_sealed_data() -> sgx_status_t {
             sgx_status_t::SGX_ERROR_UNEXPECTED
         }
     }
+}
+
+fn import_sealed_data() -> sgx_status_t {
+    // Import uses the verified source migration report. It does not store an approved measurement.
+    let mut f_in = match File::open(make_sgx_secret_path(FILE_MIGRATION_DATA)) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("failed to open file {}", e);
+            return sgx_status_t::SGX_ERROR_UNEXPECTED;
+        }
+    };
+
+    let mut blob = Vec::new();
+    if f_in.read_to_end(&mut blob).is_err() {
+        error!("failed to read sealed data");
+        return sgx_status_t::SGX_ERROR_UNEXPECTED;
+    }
+
+    let report_size = std::mem::size_of::<sgx_report_t>();
+    if blob.len() > report_size {
+        let source_report: sgx_report_t =
+            unsafe { std::ptr::read(blob.as_ptr() as *const sgx_report_t) };
+        if rsgx_verify_report(&source_report).is_ok() && mrsigner_allowed(&source_report.body) {
+            let mut source_pk: Ed25519PublicKey = Ed25519PublicKey::default();
+            source_pk.copy_from_slice(&source_report.body.report_data.d[..32]);
+            if !source_pk.iter().all(|&b| b == 0) {
+                return import_keychain_from_peer(&source_pk, &blob[report_size..]);
+            }
+        }
+    }
+
+    if !dest_op1_report_is_self() {
+        error!("import_sealed_data: source migration report missing or invalid");
+        return sgx_status_t::SGX_ERROR_NO_PRIVILEGE;
+    }
+    if blob.len() < 32 {
+        error!("import_sealed_data: sealed blob too short");
+        return sgx_status_t::SGX_ERROR_NO_PRIVILEGE;
+    }
+    let mut source_pk: Ed25519PublicKey = Ed25519PublicKey::default();
+    source_pk.copy_from_slice(&blob[..32]);
+    if source_pk.iter().all(|&b| b == 0) {
+        error!("import_sealed_data: source pk empty");
+        return sgx_status_t::SGX_ERROR_NO_PRIVILEGE;
+    }
+    import_keychain_from_peer(&source_pk, &blob[32..])
 }
 
 fn import_sealing_legacy() -> sgx_status_t {
@@ -1629,6 +1854,7 @@ const MAX_VARIABLE_LENGTH: u32 = 100_000;
 const ENCRYPTED_RANDOM_LENGTH: u32 = 48;
 const PROOF_LENGTH: u32 = 32;
 const BLOCK_HASH_LENGTH: u32 = 32;
+const VALSET_HASH_LENGTH: u32 = 32;
 
 macro_rules! validate_input_length {
     ($input:expr, $var_name:expr, $constant:expr) => {
@@ -1705,6 +1931,14 @@ pub unsafe extern "C" fn ecall_generate_random(
     let validator_set_hash = {
         let extra = KEY_MANAGER.extra_data.lock().unwrap();
 
+        if extra.height != _height {
+            error!(
+                "generate_random fail-closed: extra.height={} requested={}",
+                extra.height, _height
+            );
+            return sgx_status_t::SGX_ERROR_UNEXPECTED;
+        }
+
         match calculate_validator_set_hash(extra.validator_set_serialized.as_slice()) {
             Ok(tm_Sha256(hash)) => hash,
             _ => {
@@ -1728,9 +1962,7 @@ pub unsafe extern "C" fn ecall_generate_random(
 
     random.copy_from_slice(encrypted.as_slice());
 
-    // proof is an encrypted value that allows enclaves to validate that the encrypted value was created for
-    // this specific height & block. This allows for replay protection.
-    // optional improvement: Add public key signatures to be able to validate this outside the enclave
+    // New proofs bind the validator-set hash.
     #[cfg(feature = "random")]
     {
         let block_hash_slice = slice::from_raw_parts(block_hash, block_hash_len as usize);
@@ -1740,6 +1972,7 @@ pub unsafe extern "C" fn ecall_generate_random(
             _height,
             encrypted.as_slice(),
             block_hash_slice,
+            validator_set_hash.as_slice(),
         );
         _proof.copy_from_slice(proof_computed.as_slice());
     }
@@ -1868,6 +2101,8 @@ pub unsafe extern "C" fn ecall_validate_random(
     proof_len: u32,
     block_hash: *const u8,
     block_hash_len: u32,
+    valset_hash: *const u8,
+    valset_hash_len: u32,
     _height: u64,
 ) -> sgx_status_t {
     validate_input_length!(random_len, "encrypted_random", ENCRYPTED_RANDOM_LENGTH);
@@ -1875,6 +2110,10 @@ pub unsafe extern "C" fn ecall_validate_random(
     if block_hash_len != BLOCK_HASH_LENGTH {
         error!("block hash bad length");
         return sgx_status_t::SGX_ERROR_UNEXPECTED;
+    }
+    if valset_hash_len != VALSET_HASH_LENGTH {
+        error!("valset hash bad length");
+        return sgx_status_t::SGX_ERROR_INVALID_PARAMETER;
     }
 
     validate_const_ptr!(
@@ -1892,20 +2131,30 @@ pub unsafe extern "C" fn ecall_validate_random(
         block_hash_len as usize,
         sgx_status_t::SGX_ERROR_INVALID_PARAMETER
     );
+    validate_const_ptr!(
+        valset_hash,
+        valset_hash_len as usize,
+        sgx_status_t::SGX_ERROR_INVALID_PARAMETER
+    );
 
     #[cfg(feature = "random")]
     {
         let random_slice = slice::from_raw_parts(random, random_len as usize);
         let proof_slice = slice::from_raw_parts(proof, proof_len as usize);
         let block_hash_slice = slice::from_raw_parts(block_hash, block_hash_len as usize);
+        let valset_hash_slice = slice::from_raw_parts(valset_hash, valset_hash_len as usize);
 
-        if let Err(e) = block_verifier::verify::random::validate_random_proof(
+        // Handshake: 1.26 proof only (HMAC). Do not decrypt here.
+        // Execute (submit_block_signatures) still decrypts with valset extra data.
+        match block_verifier::verify::random::validate_random_proof(
             random_slice,
             proof_slice,
             block_hash_slice,
+            valset_hash_slice,
             _height,
         ) {
-            return e;
+            Ok(_) => {}
+            Err(e) => return e,
         }
     }
 

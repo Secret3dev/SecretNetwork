@@ -1,5 +1,32 @@
 # CHANGELOG
 
+# 1.27.2
+
+- Empty upgrade handler for a later halt on a chain that already applied v1.27.1.
+
+# 1.27.1
+
+- Trinity HW emergency approval is 3 of 5 (block threshold stays 5). Mainnet production list and thresholds unchanged.
+- Dest-3 keeps an already-stamped halt-height HMAC gate on a later enclave swap.
+
+# 1.27.0
+
+We thank Bluethroat Labs (https://bluethroatlabs.com) for responsibly
+disclosing Critical issues in Secret Network’s consensus and compute
+paths and for providing reproduction and remediation-validation
+evidence. Reporter: @saxenism.
+
+- Pin cosmos-sdk to Secret3dev `v0.50.14-secret.13`. Host-only; `x/distribution` ConsensusVersion stays 4. Auto-restake BeginBlock walk is removed; `MsgSetAutoRestake` enable is rejected; Authz expired-grant GC is 200/block.
+- Upgrade handler `v1.27.0`: empty `StoreUpgrades`, `RunMigrations` only. `v1_26` Continuance mint stays registered.
+- Nil-guard ICS23 ProofOps and Leaf in enclave cold-data; skip that entry.
+- Privileged compute messages are re-checked in ante, ICA, and gov EndBlock. Unparseable nested Any is rejected.
+- Malformed txs are dropped in PrepareProposal and rejected in ProcessProposal; skip-malformed in `submit_block_signatures`.
+- `MsgUpdateMachineWhitelist` returns error if the machine-id ecall failed.
+- Hardcoded cron secp256k1 removed; missing `SECRET_CRON_SECP256K1` is fail-closed.
+- Snapshot restore fails until every CodeInfo wasm blob is on disk.
+- Authenticated wasm message type is bound to the enclave op; execute cannot authorize migrate.
+- Mainnet compiled validator list is the 12-name production list, emergency threshold 5. Trinity HW uses a separate fixture (`trinity` feature).
+
 # 1.17.0
 - Fix ASA-2025-001, ASA-2025-002, ASA-2025-004, potential Denial-of-Service condition leading to temporary disability in IBC transfers to the native chain
 

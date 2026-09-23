@@ -3,9 +3,11 @@ package keeper
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	errorsmod "cosmossdk.io/errors"
 	"cosmossdk.io/log"
@@ -117,7 +119,7 @@ func (ws *WasmSnapshotter) SnapshotExtension(height uint64, payloadWriter snapsh
 }
 
 func (ws *WasmSnapshotter) RestoreExtension(
-	height uint64, format uint32, payloadReader snapshottypes.ExtensionPayloadReader, 
+	height uint64, format uint32, payloadReader snapshottypes.ExtensionPayloadReader,
 ) error {
 	if format != 1 {
 		return snapshottypes.ErrUnknownFormat
@@ -126,7 +128,7 @@ func (ws *WasmSnapshotter) RestoreExtension(
 	for {
 		wasmBytes, err := payloadReader()
 		if err == io.EOF {
-			return nil
+			return ws.ensureAllCodeWasmPresent()
 		} else if err != nil {
 			return errorsmod.Wrap(err, "invalid protobuf message")
 		}
@@ -140,4 +142,25 @@ func (ws *WasmSnapshotter) RestoreExtension(
 			return errorsmod.Wrapf(err, "failed to write wasm file '%v' to disk", wasmFilePath)
 		}
 	}
+}
+
+// ensureAllCodeWasmPresent: restore fails until every CodeInfo wasm blob is on disk.
+func (ws *WasmSnapshotter) ensureAllCodeWasmPresent() error {
+	if ws.keeper == nil || ws.cms == nil {
+		return fmt.Errorf("snapshot restore incomplete: wasm snapshotter missing keeper or store")
+	}
+	ctx := sdk.NewContext(ws.cms, tmproto.Header{}, false, log.NewNopLogger())
+	var missing []string
+	ws.keeper.IterateCodeInfos(ctx, func(id uint64, info types.CodeInfo) bool {
+		path := filepath.Join(ws.wasmDirectory, hex.EncodeToString(info.CodeHash))
+		st, err := os.Stat(path)
+		if err != nil || st.Size() == 0 {
+			missing = append(missing, fmt.Sprintf("%d", id))
+		}
+		return false
+	})
+	if len(missing) > 0 {
+		return fmt.Errorf("snapshot restore incomplete: missing wasm blobs for code ids %s", strings.Join(missing, ","))
+	}
+	return nil
 }

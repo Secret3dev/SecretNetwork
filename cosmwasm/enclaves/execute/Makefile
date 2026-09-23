@@ -50,7 +50,7 @@ else
 	SGX_COMMON_CFLAGS += -O2
 endif
 
-ifneq (,$(findstring production,$(FEATURES)))
+ifeq ($(SGX_MODE), HW)
   ENCLAVE_CONFIG = Enclave.config.prod.xml
 else
   ENCLAVE_CONFIG = Enclave.config.xml

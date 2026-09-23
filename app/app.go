@@ -76,6 +76,10 @@ import (
 	v1_24 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.24"
 	v1_25 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.25"
 	v1_26 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.26"
+	v1_26p "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.26p"
+	v1_27 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.27"
+	v1_27_1 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.27.1"
+	v1_27_2 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.27.2"
 	v1_4 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.4"
 	v1_5 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.5"
 	v1_6 "github.com/scrtlabs/SecretNetwork/app/upgrades/v1.6"
@@ -159,7 +163,11 @@ var (
 		v1_23_2.Upgrade,
 		v1_24.Upgrade,
 		v1_25.Upgrade,
-	v1_26.Upgrade,
+		v1_26.Upgrade,
+		v1_26p.Upgrade,
+		v1_27.Upgrade,
+		v1_27_1.Upgrade,
+		v1_27_2.Upgrade,
 	}
 )
 
@@ -415,6 +423,11 @@ func NewSecretNetworkApp(
 
 	// The AnteHandler handles signature verification and transaction pre-processing
 	app.SetAnteHandler(anteHandler)
+	// Wrap DefaultProposalHandler: drop malformed in Prepare (never return err)
+	// and reject in Process. Do not add a mempool.
+	liveProposal := baseapp.NewDefaultProposalHandler(app.Mempool(), app)
+	app.SetPrepareProposal(DropMalformedPrepareProposal(app.txConfig.TxDecoder(), liveProposal.PrepareProposalHandler()))
+	app.SetProcessProposal(RejectMalformedProcessProposal(app.txConfig.TxDecoder(), liveProposal.ProcessProposalHandler()))
 	// The initChainer handles translating the genesis.json file into initial state for the network
 	app.SetInitChainer(app.InitChainer)
 	app.SetBeginBlocker(app.BeginBlocker)
@@ -532,6 +545,11 @@ func (app *SecretNetworkApp) PreBlocker(ctx sdk.Context, _ *abci.RequestFinalize
 
 // EndBlocker application updates every end block
 func (app *SecretNetworkApp) EndBlocker(ctx sdk.Context) (sdk.EndBlock, error) {
+	// Re-check gov EndBlock messages before x/gov executes them.
+	// Do not return err from the guard — EndBlock err is a committed halt.
+	if app.AppKeepers.GovKeeper != nil {
+		compute.GuardGovEndBlock(ctx, app.appCodec, *app.AppKeepers.GovKeeper)
+	}
 	return app.mm.EndBlock(ctx)
 }
 

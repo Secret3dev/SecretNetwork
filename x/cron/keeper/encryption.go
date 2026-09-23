@@ -6,6 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 
 	"github.com/miscreant/miscreant.go"
 	"golang.org/x/crypto/curve25519"
@@ -14,8 +16,12 @@ import (
 	secp256k1 "github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
 	cryptotypes "github.com/cosmos/cosmos-sdk/crypto/types"
 	sdk "github.com/cosmos/cosmos-sdk/types"
+	crontypes "github.com/scrtlabs/SecretNetwork/x/cron/types"
 	regtypes "github.com/scrtlabs/SecretNetwork/x/registration"
 )
+
+// CronSecp256k1Env is the host-rotated cron signing key (base64 32-byte secp256k1).
+const CronSecp256k1Env = "SECRET_CRON_SECP256K1"
 
 var hkdfSalt = []byte{
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -24,22 +30,29 @@ var hkdfSalt = []byte{
 	0xc1, 0xa1, 0x2e, 0xa6, 0x37, 0xd7, 0xe9, 0x6d,
 }
 
-// GetModulePrivateKey returns the artificially generated cron module's secp256k1 private key.
-// The key is stored as a base64-encoded string and is used for signing scheduled transactions.
-func GetModulePrivateKey() cryptotypes.PrivKey {
-	privKeyBase64 := "fgAMxmXhxA/Gah7CtAM1/Li9Slmn5pHWc75XOUusPPQ="
+// GetModulePrivateKey returns the host-rotated cron secp256k1 key.
+// Missing or invalid key is fail-closed (no baked secret).
+func GetModulePrivateKey() (cryptotypes.PrivKey, error) {
+	privKeyBase64 := strings.TrimSpace(os.Getenv(CronSecp256k1Env))
+	if privKeyBase64 == "" {
+		return nil, crontypes.ErrMissingCronKey
+	}
 	privKeyBytes, err := base64.StdEncoding.DecodeString(privKeyBase64)
 	if err != nil {
-		fmt.Printf("failed to decode private key: %v", err)
+		return nil, fmt.Errorf("cron secp256k1 key invalid base64: %w", err)
 	}
-	return &secp256k1.PrivKey{Key: privKeyBytes}
+	if len(privKeyBytes) != 32 {
+		return nil, fmt.Errorf("cron secp256k1 key must be 32 bytes, got %d", len(privKeyBytes))
+	}
+	return &secp256k1.PrivKey{Key: privKeyBytes}, nil
 }
 
-// GetModuleTxKeyPair returns a fixed Curve25519 keypair derived from the module's secp256k1 key.
-// This keypair is used for transaction encryption/decryption and allows scheduled transactions
-// to be decrypted using the standard secretcli query command.
-func GetModuleTxKeyPair() ([]byte, []byte) {
-	privKey := GetModulePrivateKey()
+// GetModuleTxKeyPair returns a Curve25519 keypair derived from the module's secp256k1 key.
+func GetModuleTxKeyPair() ([]byte, []byte, error) {
+	privKey, err := GetModulePrivateKey()
+	if err != nil {
+		return nil, nil, err
+	}
 	privKeyBytes := privKey.Bytes()
 
 	// Derive Curve25519 private key from secp256k1 key (hash it to get 32 bytes)
@@ -49,7 +62,7 @@ func GetModuleTxKeyPair() ([]byte, []byte) {
 	var txSenderPubKey [32]byte
 	curve25519.ScalarBaseMult(&txSenderPubKey, &txSenderPrivKey)
 
-	return txSenderPrivKey[:], txSenderPubKey[:]
+	return txSenderPrivKey[:], txSenderPubKey[:], nil
 }
 
 // getTxEncryptionKey derives the transaction encryption key using the sender's private key,
@@ -79,12 +92,14 @@ func getTxEncryptionKey(ctx sdk.Context, k *Keeper, txSenderPrivKey []byte, nonc
 // This allows scheduled transactions to be decrypted using the standard secretcli query command.
 // The encryption uses AES-SIV (Synthetic Initialization Vector) mode for authenticated encryption.
 func Encrypt(ctx sdk.Context, k *Keeper, plaintext []byte) ([]byte, error) {
-	// Get fixed keypair derived from the module's secp256k1 key
-	txSenderPrivKey, txSenderPubKey := GetModuleTxKeyPair()
+	txSenderPrivKey, txSenderPubKey, err := GetModuleTxKeyPair()
+	if err != nil {
+		return nil, err
+	}
 
 	// Use random nonce (like regular transactions) instead of deterministic
 	nonce := make([]byte, 32)
-	_, err := rand.Read(nonce)
+	_, err = rand.Read(nonce)
 	if err != nil {
 		ctx.Logger().Error("Failed to generate random nonce", "error", err)
 		return nil, err

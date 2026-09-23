@@ -50,6 +50,12 @@ pub const FILE_MIGRATION_TARGET_INFO: &str = "migration_target_info.bin";
 pub const FILE_MIGRATION_DATA: &str = "migration_data.bin";
 pub const FILE_PUBKEY: &str = "pubkey.bin";
 pub const FILE_MIGRATION_CONSENSUS: &str = "migration_consensus.json";
+/// Halt height file. ASCII decimal.
+pub const FILE_HALT_HEIGHT: &str = "halt_height";
+/// Optional halt proof inputs read alongside the halt height.
+pub const FILE_HALT_ER: &str = "halt_er";
+pub const FILE_HALT_PROOF: &str = "halt_proof";
+pub const FILE_HALT_APPHASH: &str = "halt_apphash";
 
 pub const SEED_EXCH_KEY_SAVE_PATH: &str = "node-master-key.txt";
 pub const IO_KEY_SAVE_PATH: &str = "io-master-key.txt";

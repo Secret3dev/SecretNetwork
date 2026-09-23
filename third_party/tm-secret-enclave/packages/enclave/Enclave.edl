@@ -1,0 +1,43 @@
+enclave {
+    from "sgx_tstd.edl" import *;
+    from "sgx_stdio.edl" import *;
+    from "sgx_fs.edl" import *;
+    from "sgx_net.edl" import *;
+    from "sgx_time.edl" import *;
+    include "sgx_quote.h"
+    from "sgx_backtrace.edl" import *;
+    from "sgx_tstdc.edl" import *;
+    from "sgx_tprotected_fs.edl" import *;
+
+    from "sgx_env.edl" import u_getenv_ocall, u_setenv_ocall;
+
+    trusted {
+
+        public sgx_status_t ecall_health_check();
+        public int64_t ecall_generate_random(
+              [in, count=block_hash_len] const uint8_t* block_hash,
+              uint32_t block_hash_len,
+              uint64_t height,
+              [out, count=48] uint8_t* random,
+              [out, count=32] uint8_t* proof
+        );
+        public sgx_status_t ecall_submit_validator_set(
+            [in, count=val_set_len] const uint8_t* val_set,
+            uint32_t val_set_len,
+            uint64_t height
+        );
+        public sgx_status_t ecall_validate_random(
+            [in, count=random_len] const uint8_t* random,
+            uint32_t random_len,
+            [in, count=proof_len] const uint8_t* proof,
+            uint32_t proof_len,
+            [in, count=block_hash_len] const uint8_t* block_hash,
+            uint32_t block_hash_len,
+            uint64_t height
+        );
+    };
+
+    untrusted {
+
+    };
+};

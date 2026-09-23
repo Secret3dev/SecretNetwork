@@ -70,12 +70,11 @@ ENV FEATURES=${FEATURES}
 ENV FEATURES_U=${FEATURES_U}
 ENV MITIGATION_CVE_2020_0551=${MITIGATION_CVE_2020_0551}
 
-RUN git clone --branch pass-scheduled-msgs --depth 1 https://github.com/scrtlabs/tm-secret-enclave.git
-
-WORKDIR tm-secret-enclave
-
-RUN git submodule init
-RUN git submodule update --remote
+# Same in-tree shim as Dockerfile.2404. Do not clone scrtlabs/tm-secret-enclave.
+COPY third_party/tm-secret-enclave tm-secret-enclave
+RUN rm -f tm-secret-enclave/deps/incubator-teaclave-sgx-sdk
+COPY third_party/incubator-teaclave-sgx-sdk tm-secret-enclave/deps/incubator-teaclave-sgx-sdk
+WORKDIR /go/src/github.com/scrtlabs/SecretNetwork/tm-secret-enclave
 
 RUN rustup component add rust-src
 RUN cargo install xargo --version 0.3.25 --locked
@@ -90,7 +89,8 @@ ENV GOROOT=/usr/local/go
 ENV GOPATH=/go/
 ENV PATH=$PATH:/usr/local/go/bin:$GOPATH/bin
 
-ADD https://go.dev/dl/go1.21.1.linux-amd64.tar.gz go.linux-amd64.tar.gz
+# go.mod: go 1.22.11 / toolchain go1.24.0 — 1.21.1 cannot parse the module.
+ADD https://go.dev/dl/go1.24.0.linux-amd64.tar.gz go.linux-amd64.tar.gz
 RUN tar -C /usr/local -xzf go.linux-amd64.tar.gz
 RUN go install github.com/jteeuwen/go-bindata/go-bindata@latest && go-bindata -version
 
@@ -121,6 +121,7 @@ RUN true
 COPY app app
 COPY go.mod .
 COPY go.sum .
+COPY third_party third_party
 COPY cmd cmd
 COPY eip191 eip191
 COPY Makefile .
@@ -227,13 +228,6 @@ FROM release-image as mainnet-release
 ARG BUILD_VERSION="v0.0.0"
 ENV VERSION=${BUILD_VERSION}
 
-RUN STORAGE_PATH=$(echo ${VERSION} | awk -F'[.]' '{print $1 $2}') \
-    && wget -O /usr/lib/librust_cosmwasm_enclave.signed.so https://engfilestorage.blob.core.windows.net/v$STORAGE_PATH/librust_cosmwasm_enclave.signed.so
-RUN STORAGE_PATH=$(echo ${VERSION} | awk -F'[.]' '{print $1 $2}') \
-    && wget -O /usr/lib/libgo_cosmwasm.so https://engfilestorage.blob.core.windows.net/v$STORAGE_PATH/libgo_cosmwasm.so
-RUN STORAGE_PATH=$(echo ${VERSION} | awk -F'[.]' '{print $1 $2}') \
-    && wget -O /usr/lib/librandom_api.so https://engfilestorage.blob.core.windows.net/v$STORAGE_PATH/librandom_api.so
-
 COPY deployment/docker/mainnet/mainnet_node.sh .
 RUN chmod +x mainnet_node.sh
 
@@ -296,8 +290,7 @@ WORKDIR /go/src/github.com/scrtlabs/SecretNetwork/
 
 COPY check-hw check-hw
 
-RUN STORAGE_PATH=$(echo ${VERSION} | awk -F'[.]' '{print $1 $2}') \
-    && wget -O check-hw/check_hw_enclave.so https://engfilestorage.blob.core.windows.net/v$STORAGE_PATH/librust_cosmwasm_enclave.signed.so
+COPY --from=compile-secretd /go/src/github.com/scrtlabs/SecretNetwork/go-cosmwasm/librust_cosmwasm_enclave.signed.so check-hw/check_hw_enclave.so
 COPY --from=compile-secretd /go/src/github.com/scrtlabs/SecretNetwork/go-cosmwasm/librust_cosmwasm_enclave.signed.so check-hw/check_hw_enclave_testnet.so
 
 

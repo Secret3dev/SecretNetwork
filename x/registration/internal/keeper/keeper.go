@@ -225,10 +225,9 @@ func SerializeMerkleProof(ops []cmtcrypto.ProofOp) (error, []byte) {
 
 		case *ics23.CommitmentProof_Exist:
 			ep := p.Exist
-			// fmt.Printf("ExistenceProof:\n")
-			// fmt.Printf("  Key:   %s\n", hex.EncodeToString(ep.Key))
-			// fmt.Printf("  Value: %s\n", hex.EncodeToString(ep.Value))
-
+			if ep == nil || ep.Leaf == nil {
+				return fmt.Errorf("nil ICS23 existence proof or leaf"), nil
+			}
 			lo := ep.Leaf
 			// fmt.Printf("LeafOp:\n")
 			// fmt.Printf(" hash        = %v\n", lo.Hash)
@@ -271,6 +270,24 @@ func SerializeMerkleProof(ops []cmtcrypto.ProofOp) (error, []byte) {
 	return nil, proof_serialized.Bytes()
 }
 
+// ics23HasNilLeaf: skip an entry when an ICS23 existence proof has a nil Leaf.
+func ics23HasNilLeaf(ops []cmtcrypto.ProofOp) bool {
+	for _, op := range ops {
+		var cp ics23.CommitmentProof
+		if err := proto.Unmarshal(op.Data, &cp); err != nil {
+			continue
+		}
+		p, ok := cp.Proof.(*ics23.CommitmentProof_Exist)
+		if !ok {
+			continue
+		}
+		if p.Exist == nil || p.Exist.Leaf == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (k *Keeper) MaybeSetEnclaveColdData(ctx sdk.Context) error {
 	if k.coldDataSet {
 		return nil
@@ -310,19 +327,23 @@ func (k *Keeper) MaybeSetEnclaveColdData(ctx sdk.Context) error {
 		}
 
 		resp, err := k.queryer.Query(ctx, req)
-
-		var merkle_proof_serialized []byte = nil
-
-		if err == nil {
-			if resp != nil {
-				// fmt.Println("Key: ", hex.EncodeToString(resp.Key))
-				// fmt.Println("Value: ", hex.EncodeToString(resp.Value))
-				err, merkle_proof_serialized = SerializeMerkleProof(resp.ProofOps.Ops)
-			} else {
-				fmt.Println("No Merkle proof for entry: ", hex.EncodeToString(key))
-			}
-		} else {
+		if err != nil {
 			fmt.Println("Merkle proof query error: ", err)
+			continue
+		}
+		if resp == nil || resp.ProofOps == nil {
+			fmt.Println("No Merkle proof for entry: ", hex.EncodeToString(key))
+			continue
+		}
+		if ics23HasNilLeaf(resp.ProofOps.Ops) {
+			fmt.Println("Nil ICS23 Leaf, skip entry: ", hex.EncodeToString(key))
+			continue
+		}
+
+		err, merkle_proof_serialized := SerializeMerkleProof(resp.ProofOps.Ops)
+		if err != nil {
+			fmt.Println("Merkle proof serialize skip: ", err)
+			continue
 		}
 
 		api.SubmitMachineSwap(index, value, merkle_proof_serialized)
@@ -393,9 +414,9 @@ func (k Keeper) RegisterNode(ctx sdk.Context, certificate ra.Certificate, replac
 
 	if err != nil {
 		ctx.Logger().Error("[-] Register node failed", "error", err.Error())
-	} else {
-		ctx.Logger().Info("[+] Register node success", "seed", hex.EncodeToString(encSeed))
+		return nil, err
 	}
+	ctx.Logger().Info("[+] Register node success", "seed", hex.EncodeToString(encSeed))
 
 	return encSeed, nil
 }

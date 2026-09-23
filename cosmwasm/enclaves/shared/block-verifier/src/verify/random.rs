@@ -1,20 +1,65 @@
 #![cfg(feature = "random")]
 
-use enclave_crypto::SIVEncryptable;
+use enclave_crypto::{AESKey, SIVEncryptable};
 use enclave_utils::{Keychain, KEY_MANAGER};
 use log::{debug, error};
 use sgx_types::sgx_status_t;
 use tendermint::Hash;
 
+fn hmac_for_height(
+    key: &AESKey,
+    height: u64,
+    random_slice: &[u8],
+    block_hash_slice: &[u8],
+    valset_hash: &[u8],
+    include_valset: bool,
+) -> [u8; 32] {
+    if include_valset {
+        enclave_utils::random::create_random_proof(
+            key,
+            height,
+            random_slice,
+            block_hash_slice,
+            valset_hash,
+        )
+    } else {
+        enclave_utils::random::create_random_proof_v126(key, height, random_slice, block_hash_slice)
+    }
+}
+
 pub fn validate_random_proof(
     random_slice: &[u8],
     proof_slice: &[u8],
     block_hash_slice: &[u8],
+    valset_hash: &[u8],
     height: u64,
 ) -> Result<Option<u16>, sgx_status_t> {
+    let (hstar, last_block_seed) = {
+        let extra = KEY_MANAGER.extra_data.lock().unwrap();
+        (extra.random_proof_hstar, extra.last_block_seed)
+    };
+    let include_valset = enclave_utils::random::proof_includes_valset(height, hstar);
+    if include_valset {
+        println!(
+            "************* validate_random_proof height {} > H* {} (valset HMAC)",
+            height, hstar
+        );
+    } else {
+        println!(
+            "************* validate_random_proof height {} <= H* {} (1.26 HMAC, no valset)",
+            height, hstar
+        );
+    }
+
     let irs = KEY_MANAGER.initial_randomness_seed.unwrap();
-    let calculated_proof =
-        enclave_utils::random::create_random_proof(&irs, height, random_slice, block_hash_slice);
+    let calculated_proof = hmac_for_height(
+        &irs,
+        height,
+        random_slice,
+        block_hash_slice,
+        valset_hash,
+        include_valset,
+    );
 
     if calculated_proof == proof_slice {
         return Ok(None);
@@ -22,24 +67,25 @@ pub fn validate_random_proof(
 
     println!("************* validate_random_proof failed with latest seed");
 
-    // try older seeds
+    // try older seeds (same proof format for this height; never dual-try legacy SHA256)
     let seeds = KEY_MANAGER.get_consensus_seed().unwrap();
-    let extra = KEY_MANAGER.extra_data.lock().unwrap();
 
     println!(
         "************* Total seeds: {}, last used: {}",
         seeds.arr.len(),
-        extra.last_block_seed
+        last_block_seed
     );
 
-    for i_seed in extra.last_block_seed..seeds.arr.len() as u16 {
+    for i_seed in last_block_seed..seeds.arr.len() as u16 {
         let randomness_seed = Keychain::generate_randomness_seed(&seeds.arr[i_seed as usize]);
 
-        let calculated_proof_prev = enclave_utils::random::create_random_proof(
+        let calculated_proof_prev = hmac_for_height(
             &randomness_seed,
             height,
             random_slice,
             block_hash_slice,
+            valset_hash,
+            include_valset,
         );
 
         if calculated_proof_prev == proof_slice {
@@ -51,12 +97,6 @@ pub fn validate_random_proof(
             "************* validate_random failed to verify with seed {}",
             i_seed
         );
-    }
-
-    let legacy_proof =
-        enclave_utils::random::create_legacy_proof(&irs, height, random_slice, block_hash_slice);
-    if legacy_proof == proof_slice {
-        return Ok(None);
     }
 
     error!("Error validating random");
@@ -77,13 +117,18 @@ pub fn validate_encrypted_random(
         .get(48..)
         .ok_or(sgx_status_t::SGX_ERROR_INVALID_PARAMETER)?;
 
-    let i_seed_option =
-        match validate_random_proof(encrypted_random_slice, rand_proof, app_hash, height) {
-            Ok(x) => x,
-            Err(e) => {
-                return Err(e);
-            }
-        };
+    let i_seed_option = match validate_random_proof(
+        encrypted_random_slice,
+        rand_proof,
+        app_hash,
+        validator_set_hash.as_bytes(),
+        height,
+    ) {
+        Ok(x) => x,
+        Err(e) => {
+            return Err(e);
+        }
+    };
 
     debug!(
         "Encrypted random slice len: {}",

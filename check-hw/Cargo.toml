@@ -13,6 +13,7 @@ production = []
 verify-validator-whitelist = []
 light-client-validation = []
 random = []
+trinity = []
 
 [dependencies]
 sgx_types = { path = "../third_party/incubator-teaclave-sgx-sdk/sgx_types" }

@@ -599,9 +599,14 @@ pub fn verify_params(
         debug!("Verifying message signatures for: {:?}", sig_info);
 
         if let Some(callback_sig) = &sig_info.callback_sig {
-            // We return here if there's a callback signature.
-            // The sender is another contract in the same transaction, so there aren't any signed_bytes to verify or tx_bytes to check in the signed block.
-            return verify_callback_sig(callback_sig.as_slice(), sender, secret_msg, sent_funds);
+            // Callback HMAC binds VerifyParamsType so execute cannot authorize migrate.
+            return verify_callback_sig(
+                callback_sig.as_slice(),
+                sender,
+                secret_msg,
+                sent_funds,
+                verify_params_type,
+            );
         }
 
         verify_signature(sig_info, sender)?;
@@ -865,8 +870,15 @@ fn verify_callback_sig(
     sender: &CanonicalAddr,
     secret_msg: &SecretMessage,
     sent_funds: &[Coin],
+    verify_params_type: VerifyParamsType,
 ) -> Result<(), EnclaveError> {
-    if verify_callback_sig_impl(callback_signature, sender, secret_msg, sent_funds) {
+    if verify_callback_sig_impl(
+        callback_signature,
+        sender,
+        secret_msg,
+        sent_funds,
+        verify_params_type,
+    ) {
         info!("Message verified! msg.sender is the calling contract");
         return Ok(());
     }
@@ -880,12 +892,18 @@ fn verify_callback_sig_impl(
     sender: &CanonicalAddr,
     secret_msg: &SecretMessage,
     sent_funds: &[Coin],
+    verify_params_type: VerifyParamsType,
 ) -> bool {
     if callback_signature.is_empty() {
         return false;
     }
 
-    let callback_sig = create_callback_signature(sender, &secret_msg.msg, sent_funds);
+    let callback_sig = create_callback_signature(
+        sender,
+        &secret_msg.msg,
+        sent_funds,
+        verify_params_type.callback_op_tag(),
+    );
 
     if callback_signature != callback_sig {
         trace!(

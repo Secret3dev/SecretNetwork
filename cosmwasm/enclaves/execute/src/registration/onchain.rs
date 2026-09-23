@@ -46,6 +46,10 @@ fn verify_attestation_dcap(
 ) -> Result<VerifiedSgxQuote, NodeAuthResult> {
     let tm_s = get_current_block_time_s();
     trace!("Current block time: {}", tm_s);
+    if tm_s == 0 {
+        error!("DCAP verify refused time_s=0");
+        return Err(NodeAuthResult::InvalidCert);
+    }
 
     let res = match verify_quote_sgx(attestation, tm_s, true) {
         Ok(res) => {
@@ -67,6 +71,12 @@ fn verify_attestation_dcap(
             hex::encode(SELF_REPORT_BODY.mr_enclave.m),
             hex::encode(res.body.mr_enclave.m)
         );
+        return Err(NodeAuthResult::MrEnclaveMismatch);
+    }
+
+    #[cfg(feature = "SGX_MODE_HW")]
+    if res.body.mr_signer.m != SELF_REPORT_BODY.mr_signer.m {
+        error!("mrsigner mismatch");
         return Err(NodeAuthResult::MrEnclaveMismatch);
     }
 
@@ -181,16 +191,19 @@ pub unsafe extern "C" fn ecall_authenticate_new_node(
                 }
 
                 if let Some(machine_id_hash) = verified_quote.machine_id_hash {
-                    // handle changes to the SGX allow-list
-                    let mut allow_list = crate::registration::attestation::PPID_WHITELIST
-                        .lock()
-                        .unwrap();
-
+                    // Do not mutate PPID_WHITELIST on this ecall (failed Cosmos tx
+                    // must not keep SGX RAM). Validate only; host persists swap info; committed
+                    // Merkle path is ecall_submit_machine_swap.
                     let owner: &allow_list::Owner =
                         &verified_quote.body.report_data.d[32..].try_into().unwrap();
 
-                    if !allow_list.update(&machine_id_hash, owner, machine_pop) {
-                        return NodeAuthResult::InvalidCert;
+                    {
+                        let allow_list = crate::registration::attestation::PPID_WHITELIST
+                            .lock()
+                            .unwrap();
+                        if !allow_list.validate_update(&machine_id_hash, owner, machine_pop) {
+                            return NodeAuthResult::InvalidCert;
+                        }
                     }
 
                     slice::from_raw_parts_mut(p_machine_info, allow_list::OWNER_LEN)

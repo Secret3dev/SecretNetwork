@@ -462,16 +462,26 @@ func EncodeStakingMsg(sender sdk.AccAddress, msg *v1wasmTypes.StakingMsg) ([]sdk
 
 func EncodeStargateMsg(unpacker codectypes.AnyUnpacker) StargateEncoder {
 	return func(_ sdk.AccAddress, msg *v1wasmTypes.StargateMsg) ([]sdk.Msg, error) {
+		if msg == nil {
+			return nil, errorsmod.Wrap(types.ErrInvalidMsg, "nil Stargate")
+		}
+		if types.IsPrivilegedTypeURL(msg.TypeURL) {
+			return nil, denyPrivileged(msg.TypeURL)
+		}
 		anyObj := codectypes.Any{
 			TypeUrl: msg.TypeURL,
 			Value:   msg.Value,
 		}
 		var sdkMsg sdk.Msg
 		if err := unpacker.UnpackAny(&anyObj, &sdkMsg); err != nil {
-			return nil, errorsmod.Wrap(types.ErrInvalidMsg, fmt.Sprintf("Cannot unpack proto message with type URL: %s", msg.TypeURL))
+			return nil, errorsmod.Wrap(types.ErrUnparseableNestedAny, fmt.Sprintf("Cannot unpack proto message with type URL: %s", msg.TypeURL))
 		}
 		if err := codectypes.UnpackInterfaces(sdkMsg, unpacker); err != nil {
 			return nil, errorsmod.Wrap(types.ErrInvalidMsg, fmt.Sprintf("UnpackInterfaces inside msg: %s", err))
+		}
+		cdc, _ := unpacker.(codec.Codec)
+		if err := denylistChecker(cdc).CheckMsg(sdk.Context{}, sdkMsg, 0); err != nil {
+			return nil, err
 		}
 		return []sdk.Msg{sdkMsg}, nil
 	}

@@ -53,6 +53,8 @@ pub mod tests {
             crate::wasm_messages::tests::test_wasm_msg_tracker();
             crate::wasm_messages::tests::test_mix_wasm_bank_msg_tracker_multiple_msgs();
             crate::validator_whitelist::tests::test_parse_validators();
+            crate::validator_whitelist::tests::test_parse_validators_trims_whitespace();
+            crate::txs::test_malformed_tx_is_err();
         });
 
         if failures != 0 {

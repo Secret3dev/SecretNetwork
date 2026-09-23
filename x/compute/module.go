@@ -253,21 +253,19 @@ func (am AppModule) EndBlock(c context.Context) error {
 
 	bytesCronMsgs, err := am.keeper.GetScheduledMsgs(ctx)
 	if err != nil {
-		ctx.Logger().Error("Failed to get scheduled cron msgs for end blocker", "error", err)
-		// return err
+		ctx.Logger().Error("Failed to get scheduled cron msgs; skip-cron", "error", err)
+		bytesCronMsgs = nil
 	}
 
 	cron_msgs := tm_type.Data{Txs: bytesCronMsgs}
 	cron_data, err := cron_msgs.Marshal()
 	if err != nil {
-		ctx.Logger().Error("Failed to marshal cron_msgs")
-		// return err
+		ctx.Logger().Error("Failed to marshal cron_msgs; skip-cron", "error", err)
+		cron_data = nil
 	}
 
-	err = tmenclave.SetScheduledTxs(cron_data)
-	if err != nil {
-		ctx.Logger().Error("Failed to set scheduled txs %+v", err)
-		// return err
+	if err = tmenclave.SetScheduledTxs(cron_data); err != nil {
+		ctx.Logger().Error("Failed to set scheduled txs; skip-cron", "error", err)
 	}
 
 	// Prune old ecall records periodically

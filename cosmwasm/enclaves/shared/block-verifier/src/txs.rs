@@ -20,9 +20,15 @@ pub fn txs_from_bytes(raw_txs: &[u8]) -> SgxResult<Vec<Vec<u8>>> {
 }
 
 pub fn tx_from_bytes(raw_tx: &[u8]) -> SgxResult<Tx> {
-    let res = Tx::parse_from_bytes(raw_tx).unwrap();
+    Tx::parse_from_bytes(raw_tx).map_err(|e| {
+        error!("Unable to parse tx bytes from proto: {:?}", e);
+        sgx_status_t::SGX_ERROR_INVALID_PARAMETER
+    })
+}
 
-    Ok(res)
+#[cfg(feature = "test")]
+pub fn test_malformed_tx_is_err() {
+    assert!(tx_from_bytes(&[0xff, 0x00, 0x01]).is_err());
 }
 
 pub fn txs_hash(txs: &Vec<Vec<u8>>) -> [u8; 32] {

@@ -4,17 +4,14 @@
 package main
 
 import (
-	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"github.com/cosmos/cosmos-sdk/client"
 	"github.com/cosmos/cosmos-sdk/client/flags"
@@ -41,11 +38,6 @@ const (
 const (
 	flagLegacyRegistrationNode = "registration-node"
 	flagLegacyBootstrapNode    = "node"
-)
-
-const (
-	mainnetRegistrationService = "https://mainnet-register.scrtlabs.com/api/registernode"
-	pulsarRegistrationService  = "https://registration-service-testnet.azurewebsites.net/api/registernode"
 )
 
 type PrivValidatorKey struct {
@@ -305,16 +297,124 @@ func DumpBin() *cobra.Command {
 	return cmd
 }
 
+func parsePlanHeight(s string) (uint64, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, fmt.Errorf("empty halt_height")
+	}
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("halt_height must be a positive integer (plan.Height): %s", err)
+	}
+	if n == 0 {
+		return 0, fmt.Errorf("halt_height must be non-zero plan.Height")
+	}
+	return n, nil
+}
+
+func parsePlanHeightFromUpgradeInfo() (uint64, bool) {
+	path := filepath.Join(app.DefaultNodeHome, "data", "upgrade-info.json")
+	bz, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	var info struct {
+		Height json.RawMessage `json:"height"`
+	}
+	if json.Unmarshal(bz, &info) != nil {
+		return 0, false
+	}
+	var n uint64
+	if json.Unmarshal(info.Height, &n) == nil && n != 0 {
+		return n, true
+	}
+	var s string
+	if json.Unmarshal(info.Height, &s) == nil {
+		n, err := strconv.ParseUint(strings.TrimSpace(s), 10, 64)
+		if err == nil && n != 0 {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// resolveHaltHeight returns plan.Height. CLI second arg, then EXTRA_HEIGHT, then
+// data/upgrade-info.json. Never extra.height, never H+1. If upgrade-info is
+// present, the chosen value MUST equal it.
+func resolveHaltHeight(arg string) (string, error) {
+	plan, hasPlan := parsePlanHeightFromUpgradeInfo()
+	raw := strings.TrimSpace(arg)
+	src := "migrate_op 3 arg"
+	if raw == "" {
+		raw = strings.TrimSpace(os.Getenv("EXTRA_HEIGHT"))
+		src = "EXTRA_HEIGHT"
+	}
+	if raw == "" {
+		if hasPlan {
+			return strconv.FormatUint(plan, 10), nil
+		}
+		return "", nil
+	}
+	n, err := parsePlanHeight(raw)
+	if err != nil {
+		return "", err
+	}
+	if hasPlan && n != plan {
+		return "", fmt.Errorf("%s=%d is not plan.Height %d (not extra.height, not H+1)", src, n, plan)
+	}
+	return strconv.FormatUint(n, 10), nil
+}
+
+func stampHaltHeightFile(haltHeight string) error {
+	dir := os.Getenv("SCRT_SGX_STORAGE")
+	if dir == "" {
+		dir = "/opt/secret/.sgx_secrets"
+	}
+	path := filepath.Join(dir, "halt_height")
+	haltHeight = strings.TrimSpace(haltHeight)
+	if haltHeight == "" {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		return nil
+	}
+	n, err := parsePlanHeight(haltHeight)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(strconv.FormatUint(n, 10)+"\n"), 0o600)
+}
+
 func MigrationOp() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "migrate_op [opcode]",
+		Use:   "migrate_op [opcode] [halt_height]",
 		Short: "Migration operation",
-		Long:  "0: migrate from SGX 2.17 format, 1: create migration report, 2: export sealing key for the new enclave, 3: import sealing data, 4: import legacy data, 5: self target info",
-		Args:  cobra.ExactArgs(1),
+		Long:  "0: migrate from SGX 2.17 format, 1: create migration report, 2: export sealing key for the new enclave, 3: import sealing data, 4: import legacy data, 5: self target info. Opcode 3: second arg / EXTRA_HEIGHT / data/upgrade-info.json MUST be plan.Height, never extra.height, never H+1. Empty stamp deletes a stale halt_height file.",
+		Args:  cobra.RangeArgs(1, 2),
 		RunE: func(_ *cobra.Command, args []string) error {
 			op_num, err := strconv.ParseUint(args[0], 10, 32)
 			if err != nil {
 				return fmt.Errorf("opcode should be a number: %s", err)
+			}
+
+			if uint32(op_num) == 3 {
+				arg := ""
+				if len(args) >= 2 {
+					arg = args[1]
+				}
+				h, err := resolveHaltHeight(arg)
+				if err != nil {
+					return err
+				}
+				if err := stampHaltHeightFile(h); err != nil {
+					return err
+				}
+				if h == "" {
+					return fmt.Errorf("migrate_op 3 requires halt_height = plan.Height (second arg, EXTRA_HEIGHT, or data/upgrade-info.json); empty stamp removed any stale halt_height file")
+				}
 			}
 
 			_, err = api.MigrationOp(uint32(op_num))
@@ -494,193 +594,20 @@ func AutoRegisterNode() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auto-register",
 		Short: "Perform remote attestation of the enclave",
-		Long: `Automatically handles all registration processes. ***EXPERIMENTAL***
-Please report any issues with this command
+		Long: `Coming soon. Register with tx register auth.
 `,
 		Args: cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			sgxSecretsFolder := os.Getenv("SCRT_SGX_STORAGE")
-			if sgxSecretsFolder == "" {
-				sgxSecretsFolder = os.ExpandEnv("/opt/secret/.sgx_secrets")
-			}
-
-			sgxSecretPath := filepath.Join(sgxSecretsFolder, reg.EnclaveSealedData)
-			sgxAttestationCombined := filepath.Join(sgxSecretsFolder, reg.AttestationCombinedPath)
-
-			resetFlag, err := cmd.Flags().GetBool(flagReset)
-			if err != nil {
-				return fmt.Errorf("error with reset flag: %s", err)
-			}
-
-			if !resetFlag {
-				if _, err := os.Stat(sgxSecretPath); os.IsNotExist(err) {
-					fmt.Println("Creating new enclave registration key")
-					_, err := api.KeyGen()
-					if err != nil {
-						return fmt.Errorf("failed to initialize enclave: %w", err)
-					}
-				} else {
-					fmt.Println("Enclave key already exists. If you wish to overwrite and reset the node, use the --reset flag")
-					return nil
-				}
-			} else {
-				fmt.Println("Reset enclave flag set, generating new enclave registration key. You must now re-register the node")
-				_ = os.Remove(sgxAttestationCombined)
-				_, err := api.KeyGen()
-				if err != nil {
-					return fmt.Errorf("failed to initialize enclave: %w", err)
-				}
-			}
-
-			err = CreateAttestationReportEx(cmd, false)
-			if err != nil {
-				return fmt.Errorf("failed to create attestation report: %w", err)
-			}
-
-			// read the attestation certificate that we just created
-			certCombined, err := os.ReadFile(sgxAttestationCombined)
-			if err != nil {
-				_ = os.Remove(sgxAttestationCombined)
-				return err
-			}
-
-			// verify certificate
-			_, err = ra.VerifyCombinedCert(certCombined)
-			if err != nil {
-				return err
-			}
-
-			regUrl := mainnetRegistrationService
-
-			pulsarFlag, err := cmd.Flags().GetBool(flagPulsar)
-			if err != nil {
-				return fmt.Errorf("error with testnet flag: %s", err)
-			}
-
-			// register the node
-			customRegUrl, err := cmd.Flags().GetString(flagCustomRegistrationService)
-			if err != nil {
-				return err
-			}
-
-			if pulsarFlag {
-				regUrl = pulsarRegistrationService
-				log.Println("Registering node on Pulsar testnet")
-			} else if customRegUrl != "" {
-				regUrl = customRegUrl
-				log.Println("Registering node with custom registration service")
-			} else {
-				log.Println("Registering node on mainnet")
-			}
-
-			// call registration service to register us
-			data := []byte(fmt.Sprintf(`{
-				"certificate": "%s"
-			}`, base64.StdEncoding.EncodeToString(certCombined)))
-
-			resp, err := http.Post(regUrl, "application/json", bytes.NewBuffer(data))
-			if err != nil {
-				log.Fatalln(err)
-			}
-
-			defer resp.Body.Close()
-
-			body, err := io.ReadAll(resp.Body)
-			if err != nil {
-				log.Fatalln(err)
-			}
-
-			if resp.StatusCode != http.StatusOK {
-				errDetails := ErrorResponse{}
-				err := json.Unmarshal(body, &errDetails)
-				if err != nil {
-					return fmt.Errorf("registration TX was not successful - %s", err)
-				}
-				return fmt.Errorf("registration TX was not successful - %s", errDetails.Details)
-			}
-
-			details := OkayResponse{}
-			err = json.Unmarshal(body, &details)
-			if err != nil {
-				return fmt.Errorf("error getting seed from registration service - %s", err)
-			}
-
-			seed := details.Details.Value
-			log.Printf(`seed: %s\n`, seed)
-
-			if len(seed) > 2 {
-				seed = seed[2:]
-			}
-
-			if (len(seed)%reg.EncryptedKeyGranularity != 0) || !reg.IsHexString(seed) {
-				return fmt.Errorf("invalid encrypted seed format (requires hex string of length 148 without 0x prefix)")
-			}
-
-			regPublicKey := details.RegistrationKey
-
-			// We expect seed to be 48 bytes of encrypted data (aka 96 hex chars) [32 bytes + 12 IV]
-
-			cfg := reg.SeedConfig{
-				EncryptedKey: seed,
-				MasterKey:    regPublicKey,
-				Version:      reg.SeedConfigVersion,
-			}
-
-			cfgBytes, err := json.Marshal(&cfg)
-			if err != nil {
-				return err
-			}
-
-			homeDir, err := cmd.Flags().GetString(flags.FlagHome)
-			if err != nil {
-				return err
-			}
-
-			seedCfgFile := filepath.Join(homeDir, reg.SecretNodeCfgFolder, reg.SecretNodeSeedNewConfig)
-			seedCfgDir := filepath.Join(homeDir, reg.SecretNodeCfgFolder)
-
-			// create seed directory if it doesn't exist
-			_, err = os.Stat(seedCfgDir)
-			if os.IsNotExist(err) {
-				err = os.MkdirAll(seedCfgDir, 0o777)
-				if err != nil {
-					return fmt.Errorf("failed to create directory '%s': %w", seedCfgDir, err)
-				}
-			}
-
-			// write seed to file - if file doesn't exist, write it. If it does, delete the existing one and create this
-			_, err = os.Stat(seedCfgFile)
-			if os.IsNotExist(err) {
-				err = os.WriteFile(seedCfgFile, cfgBytes, 0o600)
-				if err != nil {
-					return err
-				}
-			} else {
-				err = os.Remove(seedCfgFile)
-				if err != nil {
-					return fmt.Errorf("failed to modify file '%s': %w", seedCfgFile, err)
-				}
-
-				err = os.WriteFile(seedCfgFile, cfgBytes, 0o600)
-				if err != nil {
-					return fmt.Errorf("failed to create file '%s': %w", seedCfgFile, err)
-				}
-			}
-
-			fmt.Println("Done registering! Ready to start...")
-			return nil
+			return fmt.Errorf("auto-register is not available yet; register with tx register auth")
 		},
 	}
 	cmd.Flags().Bool(flagReset, false, "Optional flag to regenerate the enclave registration key")
 	cmd.Flags().Bool(flagPulsar, false, "Set --pulsar flag if registering with the Pulsar testnet")
 	cmd.Flags().String(flagCustomRegistrationService, "", "Use this flag if you wish to specify a custom registration service")
-
 	cmd.Flags().String(flagLegacyBootstrapNode, "", "DEPRECATED: This flag is no longer required or in use")
 	cmd.Flags().String(flagLegacyRegistrationNode, "", "DEPRECATED: This flag is no longer required or in use")
-
 	cmd.Flags().Bool(flag_no_epid, false, "Optional flag to disable EPID attestation")
 	cmd.Flags().Bool(flag_no_dcap, false, "Optional flag to disable DCAP attestation")
 	cmd.Flags().Bool(flag_unbound_attestation, false, "Optional flag to disable attestation to user binding")
-
 	return cmd
 }

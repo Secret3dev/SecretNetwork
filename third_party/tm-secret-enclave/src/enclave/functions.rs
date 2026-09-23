@@ -1,0 +1,78 @@
+use sgx_types::{sgx_status_t, SgxResult};
+
+
+use libc::{dlsym, RTLD_DEFAULT, c_void};
+use std::ffi::CString;
+use std::ptr::{null_mut};
+
+type Symbol = *mut c_void;
+
+fn ensure_symbol_found(name: &str, p_symbol: &mut Symbol) -> bool {
+
+    if (*p_symbol).is_null() {
+
+        let symbol_name = CString::new(name).unwrap();
+        *p_symbol = unsafe { dlsym(RTLD_DEFAULT, symbol_name.as_ptr()) };
+
+        if (*p_symbol).is_null() {
+            println!("ERROR: symbol {} not found", name);
+            return false;
+        }
+    }
+    true
+}
+
+static mut S_PFN_RANDOM_NUMBER: Symbol = null_mut();
+
+pub fn random_number(block_hash: &[u8], height: u64) -> SgxResult<Vec<u8>> {
+
+    unsafe {
+
+        if !ensure_symbol_found("secret_impl_random_number", &mut S_PFN_RANDOM_NUMBER) {
+            return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
+        }
+
+        // Cast the raw pointer to the correct function type
+        type Pfn = unsafe extern "C" fn(&[u8], height: u64) -> Result<Vec<u8>, sgx_status_t>;
+        let function: Pfn = std::mem::transmute(S_PFN_RANDOM_NUMBER);
+
+        function(block_hash, height)
+    }
+}
+
+static mut S_PFN_NEXT_VALIDATOR_SET: Symbol = null_mut();
+
+pub fn next_validator_set(val_set: &[u8], height: u64) -> SgxResult<()> {
+
+    unsafe {
+
+        if !ensure_symbol_found("secret_impl_next_validator_set", &mut S_PFN_NEXT_VALIDATOR_SET) {
+            return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
+        }
+        
+
+        // Cast the raw pointer to the correct function type
+        type Pfn = unsafe extern "C" fn(&[u8], height: u64) -> Result<(), sgx_status_t>;
+        let function: Pfn = std::mem::transmute(S_PFN_NEXT_VALIDATOR_SET);
+        
+        function(val_set, height)
+    }
+}
+
+static mut S_PFN_VALIDATE_RANDOM: Symbol = null_mut();
+
+pub fn enclave_validate_random(random: &[u8], proof: &[u8], block_hash: &[u8], valset_hash: &[u8], height: u64) -> SgxResult<()> {
+
+    unsafe {
+
+        if !ensure_symbol_found("secret_impl_validate_random", &mut S_PFN_VALIDATE_RANDOM) {
+            return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
+        }
+
+        // Cast the raw pointer to the correct function type
+        type Pfn = unsafe extern "C" fn(&[u8], &[u8], &[u8], &[u8], height: u64) -> Result<(), sgx_status_t>;
+        let function: Pfn = std::mem::transmute(S_PFN_VALIDATE_RANDOM);
+
+        function(random, proof, block_hash, valset_hash, height)
+    }
+}

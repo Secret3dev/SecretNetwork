@@ -14,6 +14,7 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::sgxfs::SgxFile;
 use std::sync::SgxMutex;
+use std::untrusted::fs::File;
 use tendermint::validator::Set;
 use tendermint_proto::v0_38::types::ValidatorSet as RawValidatorSet;
 use tendermint_proto::Protobuf;
@@ -44,6 +45,9 @@ pub struct KeychainMutableData {
     pub next_mr_enclave: Option<sgx_measurement_t>,
     pub last_block_seed: u16,
     pub height_machine_allowed: u64,
+    /// Height gate for which proof format is accepted. Zero means every height uses the validator-set format.
+    /// Not KEYCHAIN_DATA_VER — extra flag bit 16.
+    pub random_proof_hstar: u64,
     // the following is NOT serialized
     pub machine_allowed: bool,
 }
@@ -95,6 +99,7 @@ lazy_static! {
 
 const KEYCHAIN_DATA_VER: u32 = 1;
 const DEF_LAST_BLOCK_SEED: u16 = 1;
+const EX_FLAG_RANDOM_PROOF_HSTAR: u8 = 16;
 
 #[allow(clippy::new_without_default)]
 impl Keychain {
@@ -140,7 +145,7 @@ impl Keychain {
             8_u8
         } else {
             0_u8
-        });
+        }) | EX_FLAG_RANDOM_PROOF_HSTAR;
 
         writer.write_all(&[ex_flag])?;
 
@@ -159,6 +164,8 @@ impl Keychain {
         if ex_flag & 8_u8 != 0 {
             writer.write_all(&extra.height_machine_allowed.to_le_bytes())?;
         }
+
+        writer.write_all(&extra.random_proof_hstar.to_le_bytes())?;
 
         Ok(())
     }
@@ -252,6 +259,13 @@ impl Keychain {
             extra.height_machine_allowed = 0;
         }
 
+        if (flag_bytes[0] & EX_FLAG_RANDOM_PROOF_HSTAR) != 0 {
+            extra.random_proof_hstar = Self::read_u64(reader)?;
+        } else {
+            // Older sealed blobs omit this field.
+            extra.random_proof_hstar = 0;
+        }
+
         Ok(())
     }
 
@@ -262,12 +276,62 @@ impl Keychain {
         self.serialize(&mut file).unwrap();
     }
 
+    /// Reads the halt height file when it contains a non-zero integer.
+    fn read_halt_height_file() -> Option<u64> {
+        let path = make_sgx_secret_path(FILE_HALT_HEIGHT);
+        let mut f = File::open(&path).ok()?;
+        let mut s = String::new();
+        f.read_to_string(&mut s).ok()?;
+        let n = s.trim().parse::<u64>().ok()?;
+        if n == 0 {
+            None
+        } else {
+            Some(n)
+        }
+    }
+
+    /// If the stored height gate is unset, fill it from the halt height file.
+    fn apply_hstar_from_halt_file_on_load(&mut self) {
+        let halt = Self::read_halt_height_file();
+        let halt_s = halt
+            .map(|h| h.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let already = {
+            let extra = self.extra_data.lock().unwrap();
+            println!(
+                "loaded random_proof_hstar={} extra.height={} halt_height_file={}",
+                extra.random_proof_hstar, extra.height, halt_s
+            );
+            extra.random_proof_hstar != 0
+        };
+        if already {
+            return;
+        }
+        let h = match halt {
+            Some(h) => h,
+            None => return,
+        };
+        {
+            let mut extra = self.extra_data.lock().unwrap();
+            if extra.random_proof_hstar != 0 {
+                return;
+            }
+            extra.random_proof_hstar = h;
+        }
+        self.save();
+        println!(
+            "load: stamped random_proof_hstar={} from halt_height file",
+            h
+        );
+    }
+
     fn load(&mut self) -> bool {
         let path: &str = &SEALED_DATA_PATH;
         match SgxFile::open_ex(path, &SEALING_KDK) {
             Ok(mut file) => {
                 println!("Sealed data opened");
                 self.deserialize(&mut file).unwrap();
+                self.apply_hstar_from_halt_file_on_load();
                 true
             }
             Err(err) => {
@@ -320,6 +384,7 @@ impl Keychain {
                 next_mr_enclave: None,
                 last_block_seed: DEF_LAST_BLOCK_SEED,
                 height_machine_allowed: 0,
+                random_proof_hstar: 0,
                 machine_allowed: false,
             }),
         }

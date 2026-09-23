@@ -78,6 +78,15 @@ var (
 
 	// ErrExceedMaxContractSize error if max contract size is exceeded
 	ErrExceedMaxContractSize = errors.Register(DefaultCodespace, 31, "max contract size exceeded")
+
+	// ErrUpgradeProposalPassedDenied: MsgUpgradeProposalPassed is rejected in every state.
+	ErrUpgradeProposalPassedDenied = errors.Register(DefaultCodespace, 32, "MsgUpgradeProposalPassed is rejected in every state")
+
+	// ErrPrivilegedDenied: privileged compute message denied.
+	ErrPrivilegedDenied = errors.Register(DefaultCodespace, 33, "privileged compute message denied")
+
+	// ErrUnparseableNestedAny: nested Any that cannot be unpacked is rejected.
+	ErrUnparseableNestedAny = errors.Register(DefaultCodespace, 34, "unparseable nested Any")
 )
 
 func IsEncryptedErrorCode(code uint32) bool {

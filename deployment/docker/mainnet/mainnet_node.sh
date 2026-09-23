@@ -9,14 +9,14 @@ FORCE_SYNC=${FORCE_SYNC:-}
 
 CHAINID="${CHAINID:-secret-4}"
 MONIKER="${MONIKER:-default}"
-REGISTRATION_SERVICE="${REGISTRATION_SERVICE:-https://mainnet-register.scrtlabs.com/api/registernode}"
 STATE_SYNC1="${STATE_SYNC1:-http://peer.node.scrtlabs.com:26657}"
 STATE_SYNC2="${STATE_SYNC2:-${STATE_SYNC1:-http://peer.node.scrtlabs.com:26657}}"
 
 file=/opt/secret/.sgx_secrets/consensus_seed.sealed
 if [ ! -z "$FORCE_REGISTER" ] || [ ! -e "$file" ];
 then
-  secretd auto-register --reset --registration-service $REGISTRATION_SERVICE
+  echo "auto-register is not available yet; register with tx register auth"
+  exit 1
 fi
 
 file=/root/.secretd/data/blockstore.db/MANIFEST-000000

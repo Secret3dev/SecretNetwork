@@ -213,6 +213,44 @@ pub enum VerifyParamsType {
     UpdateAdmin,
 }
 
+impl VerifyParamsType {
+    /// Callback HMAC domain. Execute must not verify as migrate.
+    pub fn callback_op_tag(self) -> &'static [u8] {
+        match self {
+            VerifyParamsType::Init => b"instantiate",
+            VerifyParamsType::Migrate => b"migrate",
+            VerifyParamsType::UpdateAdmin => b"update_admin",
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE) => b"execute",
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_REPLY) => b"reply",
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_CHANNEL_OPEN) => {
+                b"ibc_channel_open"
+            }
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_CHANNEL_CONNECT) => {
+                b"ibc_channel_connect"
+            }
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_CHANNEL_CLOSE) => {
+                b"ibc_channel_close"
+            }
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_PACKET_RECEIVE) => {
+                b"ibc_packet_receive"
+            }
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_PACKET_ACK) => b"ibc_packet_ack",
+            VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_IBC_PACKET_TIMEOUT) => {
+                b"ibc_packet_timeout"
+            }
+            VerifyParamsType::HandleType(
+                HandleType::HANDLE_TYPE_IBC_WASM_HOOKS_INCOMING_TRANSFER,
+            ) => b"ibc_hooks_in",
+            VerifyParamsType::HandleType(
+                HandleType::HANDLE_TYPE_IBC_WASM_HOOKS_OUTGOING_TRANSFER_ACK,
+            ) => b"ibc_hooks_ack",
+            VerifyParamsType::HandleType(
+                HandleType::HANDLE_TYPE_IBC_WASM_HOOKS_OUTGOING_TRANSFER_TIMEOUT,
+            ) => b"ibc_hooks_timeout",
+        }
+    }
+}
+
 #[derive(Deserialize, Clone, Debug, PartialEq)]
 pub struct SigInfo {
     pub tx_bytes: Binary,

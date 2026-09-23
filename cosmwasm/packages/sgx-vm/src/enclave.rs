@@ -13,18 +13,20 @@ use parking_lot::{Condvar, Mutex};
 
 use sgx_types::sgx_enclave_id_t;
 
-#[cfg(feature = "production")]
-const ENCLAVE_DEBUG: i32 = 0;
-
-#[cfg(not(feature = "production"))]
-const ENCLAVE_DEBUG: i32 = 1;
+fn enclave_debug_flag() -> i32 {
+    // HW TESTNET and MAINNET: create-flag 0. SW dummy: 1 only under SGX_MODE=SW.
+    match env::var("SGX_MODE") {
+        Ok(m) if m == "SW" => 1,
+        _ => 0,
+    }
+}
 
 fn init_enclave(enclave_file: &str) -> SgxResult<SgxEnclave> {
     let mut launch_token: sgx_launch_token_t = [0; 1024];
     let mut launch_token_updated: i32 = 0;
     // call sgx_create_enclave to initialize an enclave instance
     // Debug Support: set 2nd parameter to 1
-    let debug: i32 = ENCLAVE_DEBUG;
+    let debug: i32 = enclave_debug_flag();
     let mut misc_attr = sgx_misc_attribute_t {
         secs_attr: sgx_attributes_t { flags: 0, xfrm: 0 },
         misc_select: 0,
@@ -194,6 +196,8 @@ extern "C" {
         proof_len: u32,
         block_hash: *const u8,
         block_hash_len: u32,
+        valset_hash: *const u8,
+        valset_hash_len: u32,
         height: u64,
     ) -> sgx_status_t;
 
@@ -274,6 +278,7 @@ pub extern "C" fn secret_impl_validate_random(
     random: &[u8],
     proof: &[u8],
     block_hash: &[u8],
+    valset_hash: &[u8],
     height: u64,
 ) -> SgxResult<()> {
     let eid = get_secret_eid()?;
@@ -288,6 +293,8 @@ pub extern "C" fn secret_impl_validate_random(
             proof.len() as u32,
             block_hash.as_ptr(),
             block_hash.len() as u32,
+            valset_hash.as_ptr(),
+            valset_hash.len() as u32,
             height,
         )
     };

@@ -55,7 +55,7 @@ lazy_static! {
         } else {
             ENCLAVE_FILE_MAINNET
         };
-        EnclaveDoorbell::new(enclave_file, TCS_NUM, is_testnet as i32)
+        EnclaveDoorbell::new(enclave_file, TCS_NUM, 0)
     };
 }
 
@@ -177,8 +177,7 @@ async fn get_allowed_hashes_async() -> Result<HashSet<[u8; 20]>, Box<dyn Error>>
 
 
     let url = "https://api.github.com/repos/scrtlabs/whitelist-test/contents/whitelist.txt?ref=master";
-    let token_hex = "6769746875625F7061745F313141434A4E50535130424350396277544D79324B4F5F42683849554B56446C493545714D727A7A6B44726677475A524E457A6E526B69506D5051527853636C524D59334243513551585563377339646334";
-    let token = String::from_utf8(hex::decode(token_hex).unwrap()).unwrap();
+    let token = std::env::var("GITHUB_TOKEN").map_err(|_| "GITHUB_TOKEN not set")?;
 
     let https = hyper_rustls::HttpsConnectorBuilder::new()
         .with_native_roots()
@@ -605,6 +604,83 @@ fn add_cpu_info()
     let _ = file.write_all(cpuinfo_encoded.as_bytes());
 }
 
+fn parse_u64_nonzero_plan(s: &str) -> Option<u64> {
+    let n = s.trim().parse::<u64>().ok()?;
+    if n == 0 {
+        None
+    } else {
+        Some(n)
+    }
+}
+
+fn plan_height_from_upgrade_info() -> Option<u64> {
+    let mut paths: Vec<String> = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        paths.push(format!("{}/.secretd/data/upgrade-info.json", home));
+    }
+    paths.push("/root/.secretd/data/upgrade-info.json".to_string());
+    paths.push("/opt/secret/.secretd/data/upgrade-info.json".to_string());
+    for path in paths {
+        if let Ok(mut f) = File::open(&path) {
+            let mut buf = Vec::new();
+            if f.read_to_end(&mut buf).is_ok() {
+                if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&buf) {
+                    if let Some(h) = v.get("height") {
+                        if let Some(n) = h.as_u64() {
+                            if n != 0 {
+                                return Some(n);
+                            }
+                        }
+                        if let Some(s) = h.as_str() {
+                            if let Some(n) = parse_u64_nonzero_plan(s) {
+                                return Some(n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Writes the plan height into the halt-height file.
+/// An empty EXTRA_HEIGHT removes a stale halt-height file.
+fn stamp_halt_height_for_dest3() -> Result<(), String> {
+    let dir = std::env::var("SCRT_SGX_STORAGE")
+        .unwrap_or_else(|_| "/opt/secret/.sgx_secrets".to_string());
+    let path = std::path::Path::new(&dir).join("halt_height");
+    let plan = plan_height_from_upgrade_info();
+    let extra = std::env::var("EXTRA_HEIGHT")
+        .ok()
+        .and_then(|s| parse_u64_nonzero_plan(&s));
+    let halt = match (extra, plan) {
+        (Some(e), Some(p)) if e != p => {
+            return Err(format!(
+                "EXTRA_HEIGHT={} is not plan.Height {} (not extra.height, not H+1)",
+                e, p
+            ));
+        }
+        (Some(e), _) => Some(e),
+        (None, Some(p)) => Some(p),
+        (None, None) => None,
+    };
+    match halt {
+        None => {
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .map_err(|e| format!("unlink stale halt_height: {}", e))?;
+            }
+            Ok(())
+        }
+        Some(n) => {
+            std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+            std::fs::write(&path, format!("{}\n", n)).map_err(|e| e.to_string())?;
+            Ok(())
+        }
+    }
+}
+
 fn main() {
     let matches = App::new("Check HW")
         .version("1.0")
@@ -663,21 +739,43 @@ fn main() {
     if let Some(migrate_op) = matches.value_of("migrate_op") {
         let op = migrate_op.parse::<u32>().unwrap();
 
+        if op == 3 {
+            if let Err(e) = stamp_halt_height_for_dest3() {
+                eprintln!("FATAL: dest-3 halt_height must be plan.Height: {}", e);
+                std::process::exit(1);
+            }
+        }
+
         let mut retval = sgx_status_t::SGX_ERROR_BUSY;
         let status = unsafe { ecall_migration_op(eid, &mut retval, op) };
 
         println!("Migration op reval: {}, {}", status, retval);
 
-        if retval != sgx_status_t::SGX_SUCCESS {
-            std::process::exit(retval as i32);
-        }
-
-        if status != sgx_status_t::SGX_SUCCESS {
-            std::process::exit(retval as i32);
-        }
-
         if op == 1 {
-            add_cpu_info();
+            // Opcode 1 must leave a local report. Fail closed if that file is missing.
+            let local = get_sgx_secret_path("migration_report_local.bin");
+            match std::fs::metadata(&local) {
+                Ok(m) if m.len() > 0 => {
+                    if retval != sgx_status_t::SGX_SUCCESS || status != sgx_status_t::SGX_SUCCESS {
+                        eprintln!(
+                            "check-hw 1: Intel quote failed ({}, {}); using local report {}",
+                            status, retval, local
+                        );
+                    }
+                    add_cpu_info();
+                }
+                _ => {
+                    eprintln!("FATAL: check-hw 1 missing local report {}", local);
+                    std::process::exit(1);
+                }
+            }
+        } else {
+            if retval != sgx_status_t::SGX_SUCCESS {
+                std::process::exit(retval as i32);
+            }
+            if status != sgx_status_t::SGX_SUCCESS {
+                std::process::exit(retval as i32);
+            }
         }
 
     } else if matches.is_present("server_seed") {

@@ -28,6 +28,7 @@ pub mod tests {
             report::tests::test_sgx_quote_parse_from();
             report::tests::test_attestation_dcap();
             report::tests::test_attestation_dcap_temper();
+            super::offchain::test_is_msg_machine_id_malformed_len_returns_false();
         });
 
         if failures != 0 {

@@ -511,6 +511,7 @@ func (ak *SecretAppKeepers) InitCustomKeepers(
 
 	var icaHostStack porttypes.IBCModule
 	icaHostStack = icahost.NewIBCModule(*ak.ICAHostKeeper)
+	icaHostStack = compute.NewPrivilegedICAMiddleware(icaHostStack, appCodec, *ak.GovKeeper)
 	icaHostStack = ibcfee.NewIBCMiddleware(icaHostStack, ak.IbcFeeKeeper)
 	icaHostStack = ibcswitch.NewIBCMiddleware(icaHostStack, ak.IbcSwitchKeeper)
 

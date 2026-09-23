@@ -98,6 +98,7 @@ type Keeper struct {
 	// paramSpace    subspace.Subspace
 	LastMsgManager *baseapp.LastMsgMarkerContainer
 	authority      string
+	govKeeper      govkeeper.Keeper
 	// storeKeys maps store key names to the app's registered StoreKey
 	// instances so ApplyCrossModuleOps resolves correct pointers.
 	storeKeys map[string]storetypes.StoreKey
@@ -177,6 +178,7 @@ func NewKeeper(
 		HomeDir:        homeDir,
 		LastMsgManager: lastMsgManager,
 		authority:      authority,
+		govKeeper:      govKeeper,
 	}
 	keeper.queryPlugins = DefaultQueryPlugins(govKeeper, distKeeper, mintKeeper, bankKeeper, stakingKeeper, queryRouter, &keeper, channelKeeper).Merge(customPlugins)
 
@@ -1236,26 +1238,20 @@ func (k Keeper) GetContractInfo(ctx sdk.Context, contractAddress sdk.AccAddress)
 
 func (k Keeper) GetScheduledMsgs(ctx sdk.Context) ([][]byte, error) {
 	cronScheduledMsgs := k.cronKeeper.GetScheduledMsgs(ctx)
+	if len(cronScheduledMsgs) == 0 {
+		return nil, nil
+	}
 
-	// // Update the schedule's last execution height.
-	// schedule.LastExecuteHeight = uint64(ctx.BlockHeight()) //nolint:gosec
-	// k.storeSchedule(ctx, schedule)
-
-	// Get the module private key once.
 	var txBytesList [][]byte
-	privKey := cronkeeper.GetModulePrivateKey()
+	privKey, err := cronkeeper.GetModulePrivateKey()
+	if err != nil {
+		return nil, err
+	}
 	pubKey := privKey.PubKey()
 	senderAddr := sdk.AccAddress(pubKey.Address())
 
-	// Retrieve or create the account info using the derived address.
-	// The cron module account needs to exist for sequence tracking, but it doesn't need funds
-	// since scheduled transactions are fee-free.
-	// Note: This address is derived from the hardcoded private key in GetModulePrivateKey(),
-	// so we only auto-create the account for that specific hardcoded key's address.
 	senderAcc := k.accountKeeper.GetAccount(ctx, senderAddr)
 	if senderAcc == nil {
-		// Create the account if it doesn't exist (first time running scheduled transactions).
-		// This only happens for the hardcoded cron module private key's address.
 		senderAcc = k.accountKeeper.NewAccountWithAddress(ctx, senderAddr)
 		k.accountKeeper.SetAccount(ctx, senderAcc)
 	}

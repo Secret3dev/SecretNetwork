@@ -8,9 +8,11 @@ replace (
 	cosmossdk.io/api => github.com/scrtlabs/cosmos-sdk-api v0.7.6-secret.0
 	cosmossdk.io/store => github.com/scrtlabs/cosmos-sdk-store v1.1.1-secret.1
 	cosmossdk.io/x/tx => github.com/scrtlabs/cosmos-sdk-x-tx v0.13.7-secret.0
-	github.com/cometbft/cometbft => github.com/scrtlabs/tendermint v0.38.23-secret.1
-	github.com/cosmos/cosmos-sdk => github.com/scrtlabs/cosmos-sdk v0.50.14-secret.12
+	github.com/cometbft/cometbft => ./third_party/tendermint
+	// Cosmos SDK checkout supplied outside this tree. x/distribution ConsensusVersion stays 4.
+	github.com/cosmos/cosmos-sdk => ./third_party/cosmos-sdk
 	github.com/cosmos/iavl => github.com/scrtlabs/iavl v1.2.2-secret.0
+	github.com/scrtlabs/tm-secret-enclave => ./third_party/tm-secret-enclave
 	github.com/syndtr/goleveldb => github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 
 	github.com/zondax/ledger-go => github.com/zondax/ledger-go v1.0.0
@@ -72,7 +74,9 @@ require (
 	github.com/cometbft/cometbft-db v0.14.1
 	github.com/cosmos/cosmos-db v1.1.1
 	github.com/cosmos/cosmos-proto v1.0.0-beta.5
+	github.com/cosmos/ics23/go v0.11.0
 	github.com/cosmos/rosetta v0.50.4
+	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/mock v1.6.0
 	github.com/hashicorp/go-metrics v0.5.3
@@ -113,14 +117,12 @@ require (
 	github.com/cosmos/btcutil v1.0.5 // indirect
 	github.com/cosmos/gogogateway v1.2.0 // indirect
 	github.com/cosmos/iavl v1.2.2 // indirect
-	github.com/cosmos/ics23/go v0.11.0 // indirect
 	github.com/cosmos/ledger-cosmos-go v0.14.0 // indirect
 	github.com/cosmos/rosetta-sdk-go v0.10.0 // indirect
 	github.com/creachadair/atomicfile v0.3.1 // indirect
 	github.com/creachadair/tomledit v0.0.24 // indirect
 	github.com/danieljoos/wincred v1.1.2 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/decred/dcrd/dcrec/secp256k1/v4 v4.4.0 // indirect
 	github.com/desertbit/timer v0.0.0-20180107155436-c41aec40b27f // indirect
 	github.com/dgraph-io/badger/v4 v4.2.0 // indirect
 	github.com/dgraph-io/ristretto v0.1.1 // indirect

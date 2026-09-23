@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	errorsmod "cosmossdk.io/errors"
+	"github.com/cosmos/cosmos-sdk/codec"
 	sdk "github.com/cosmos/cosmos-sdk/types"
 	sdkerrors "github.com/cosmos/cosmos-sdk/types/errors"
 	govtypes "github.com/cosmos/cosmos-sdk/x/gov/types"
@@ -208,23 +209,7 @@ func (m msgServer) UpdateParams(goCtx context.Context, req *types.MsgUpdateParam
 }
 
 func (m msgServer) UpgradeProposalPassed(goCtx context.Context, msg *types.MsgUpgradeProposalPassed) (*types.MsgUpgradeProposalPassedResponse, error) {
-	ctx := sdk.UnwrapSDKContext(goCtx)
-
-	if err := msg.ValidateBasic(); err != nil {
-		return nil, err
-	}
-
-	ctx.EventManager().EmitEvent(sdk.NewEvent(
-		types.EventTypeExecute,
-		sdk.NewAttribute(sdk.AttributeKeySender, msg.SenderAddress),
-		sdk.NewAttribute("mrenclave", string(msg.MrEnclaveHash)),
-	))
-
-	if err := api.OnUpgradeProposalPassed(msg.MrEnclaveHash); err != nil {
-		return nil, err
-	}
-
-	return &types.MsgUpgradeProposalPassedResponse{}, nil
+	return nil, types.ErrUpgradeProposalPassedDenied
 }
 
 func (m msgServer) ContractGovernanceProposal(goCtx context.Context, msg *types.MsgContractGovernanceProposal) (*types.MsgContractGovernanceProposalResponse, error) {
@@ -366,6 +351,11 @@ func (m msgServer) UpdateMachineWhitelist(goCtx context.Context, msg *types.MsgU
 		return nil, err
 	}
 
+	cdc, _ := m.keeper.cdc.(codec.Codec)
+	if err := NewPrivilegedChecker(cdc, m.keeper.govKeeper).checkUpdateMachineWhitelist(ctx, msg); err != nil {
+		return nil, err
+	}
+
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeMachineWhitelistUpdate,
 		sdk.NewAttribute("proposal_id", fmt.Sprintf("%d", msg.ProposalId)),
@@ -378,16 +368,25 @@ func (m msgServer) UpdateMachineWhitelist(goCtx context.Context, msg *types.MsgU
 		return nil, err
 	}
 
-	for _, id := range ids {
-		err := api.OnApproveMachineID(id)
-		id_txt := hex.EncodeToString(id)
-		if err != nil {
-			fmt.Println("Failed to add machine_id: ", id_txt)
-		} else {
-			fmt.Println("Added machine_id: ", id_txt)
-			_ = m.keeper.RegKeeper.OnNewMachine(ctx, id)
-		}
+	err = ApplyApprovedMachineIDs(ids, api.OnApproveMachineID, func(id []byte) {
+		_ = m.keeper.RegKeeper.OnNewMachine(ctx, id)
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return &types.MsgUpdateMachineWhitelistResponse{}, nil
+}
+
+// ApplyApprovedMachineIDs surfaces ecall failure. Do not return success if OnApproveMachineID failed.
+func ApplyApprovedMachineIDs(ids [][]byte, approve func([]byte) error, persist func([]byte)) error {
+	for _, id := range ids {
+		if err := approve(id); err != nil {
+			return err
+		}
+		if persist != nil {
+			persist(id)
+		}
+	}
+	return nil
 }

@@ -17,6 +17,8 @@ func RegisterLegacyAminoCodec(cdc *codec.LegacyAmino) {
 	cdc.RegisterConcrete(&MsgClearAdmin{}, "wasm/MsgClearAdmin", nil)
 	cdc.RegisterConcrete(&MsgUpdateParams{}, "wasm/MsgUpdateParams", nil)
 	cdc.RegisterConcrete(&MsgMigrateContractProposal{}, "wasm/MsgContractMigrateProposal", nil)
+	cdc.RegisterConcrete(&MsgUpgradeProposalPassed{}, MsgUpgradeProposalPassedAminoName, nil)
+	cdc.RegisterConcrete(&MsgUpdateMachineWhitelist{}, MsgUpdateMachineWhitelistAminoName, nil)
 }
 
 func RegisterInterfaces(registry types.InterfaceRegistry) {
@@ -30,6 +32,9 @@ func RegisterInterfaces(registry types.InterfaceRegistry) {
 		&MsgClearAdmin{},
 		&MsgUpdateParams{},
 		&MsgMigrateContractProposal{},
+		&MsgUpgradeProposalPassed{},
+		&MsgUpdateMachineWhitelist{},
+		&MsgUpdateMachineWhitelistProposal{},
 	)
 	msgservice.RegisterMsgServiceDesc(registry, &_Msg_serviceDesc)
 }

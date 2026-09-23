@@ -324,9 +324,7 @@ if sudo test -e "$SCRT_SGX_STORAGE/migration_report_local.bin"; then
 fi
 cp -a "$json_bak" "$SCRT_SGX_STORAGE/migration_consensus.json"
 
-# 5 self target info, check-hw 1 report, 2 export, stamp halt height, check-hw 3 import.
-# migrate_op 2 runs on the installed 1.26 enclave. On-chain next_mr returns
-# before the emergency file is read. This halt requires the emergency threshold.
+# Handover on the installed binary, then import after the new package is installed.
 export SCRT_SGX_STORAGE EXTRA_HEIGHT PLAN_HEIGHT
 secretd migrate_op 5
 run_check_hw 1

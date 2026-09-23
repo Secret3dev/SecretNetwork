@@ -10,6 +10,28 @@ DEB_BIN_DIR ?= /usr/local/bin
 DEB_LIB_DIR ?= /usr/lib
 
 DB_BACKEND ?= goleveldb
+# Operator kits use TESTNET|MAINNET + ubuntu-22.04|24.04. Trinity HW has
+# FEATURES production — must not be named TESTNET (pulsar forbids production).
+DEB_NET ?= TRINITY
+DEB_OS ?= ubuntu-24.04
+
+# Trinity HW: production path + this chain's cons addrs (not secret-4 prod.txt).
+TRINITY_127_FEATURES := verify-validator-whitelist,light-client-validation,production,random,trinity
+ifeq (,$(findstring trinity,$(TRINITY_127_FEATURES)))
+$(error TRINITY_127_FEATURES must include trinity)
+endif
+ifeq (,$(findstring production,$(TRINITY_127_FEATURES)))
+$(error TRINITY_127_FEATURES must include production)
+endif
+
+# Mainnet 1.27 HW: production list (12 addrs), no trinity.
+MAINNET_127_FEATURES := verify-validator-whitelist,light-client-validation,production,random
+ifneq (,$(findstring trinity,$(MAINNET_127_FEATURES)))
+$(error MAINNET_127_FEATURES must not include trinity)
+endif
+ifeq (,$(findstring production,$(MAINNET_127_FEATURES)))
+$(error MAINNET_127_FEATURES must include production)
+endif
 
 SGX_MODE ?= HW
 BRANCH ?= develop
@@ -204,6 +226,8 @@ deb-no-compile:
 	cp ./deployment/deb/triggers /tmp/SecretNetwork/deb/DEBIAN/triggers
 	chmod 755 /tmp/SecretNetwork/deb/DEBIAN/triggers
 	dpkg-deb --build /tmp/SecretNetwork/deb/ .
+	@test -f ./secretnetwork_$(VERSION)_amd64.deb
+	mv -f ./secretnetwork_$(VERSION)_amd64.deb ./secretnetwork_$(VERSION)_$(DEB_NET)_goleveldb_amd64_$(DEB_OS).deb
 	-rm -rf /tmp/SecretNetwork
 
 # Clean up generated files and reset the environment
@@ -262,6 +286,7 @@ build-testnet-bootstrap:
 				 --target release-image .
 
 build-testnet:
+	@case "$(FEATURES)" in *trinity*) echo "ERROR: build-testnet refuses FEATURES containing trinity" >&2; exit 1;; esac
 	@mkdir build 2>&3 || true
 	DOCKER_BUILDKIT=1 docker build --build-arg BUILDKIT_INLINE_CACHE=1 \
 				 --build-arg BUILD_VERSION=${VERSION} \
@@ -289,6 +314,7 @@ build-testnet:
 
 # special targets for building a deb package that compiles a new secretd but takes the enclaves from the latest package - used for upgrades when we don't want to replace the enclave
 build-mainnet-upgrade:
+	@case "$(FEATURES)" in *trinity*) echo "ERROR: build-mainnet-upgrade refuses FEATURES containing trinity" >&2; exit 1;; esac
 	@mkdir build 2>&3 || true
 	DOCKER_BUILDKIT=1 docker build --build-arg FEATURES="verify-validator-whitelist,light-client-validation,production, ${FEATURES}" \
                  --build-arg FEATURES_U="production, ${FEATURES_U}" \
@@ -314,6 +340,7 @@ build-mainnet-upgrade:
 
 # full mainnet build - will end up with a .deb package in the ./build folder
 build-mainnet:
+	@case "$(FEATURES)" in *trinity*) echo "ERROR: build-mainnet refuses FEATURES containing trinity" >&2; exit 1;; esac
 	@mkdir build 2>&3 || true
 	DOCKER_BUILDKIT=1 docker build --build-arg FEATURES="verify-validator-whitelist,light-client-validation,production,random, ${FEATURES}" \
                  --build-arg FEATURES_U=${FEATURES_U} \
@@ -339,6 +366,154 @@ build-mainnet:
 				 $(DOCKER_BUILD_ARGS) \
 				 --target build-deb .
 	docker run -e VERSION=${VERSION} -v $(CUR_DIR)/build:/build deb_build
+
+# Trinity-b 1.27 HW 24.04. This tree's signed enclave (never Azure wget).
+# Does not use make build-testnet / build-mainnet (22.04 Dockerfile + Azure).
+build-trinity-127:
+	@mkdir -p build
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(TRINITY_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg SECRET_NODE_TYPE=NODE \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg SGX_MODE=HW \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		$(DOCKER_BUILD_ARGS) \
+		-f deployment/dockerfiles/Dockerfile.2404 \
+		-t secret-trinity-127-node:1.27.2 \
+		--target release-image .
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(TRINITY_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg SGX_MODE=HW \
+		-f deployment/dockerfiles/Dockerfile.2404 \
+		-t secret-trinity-127-deb:1.27.2 \
+		$(DOCKER_BUILD_ARGS) \
+		--target build-deb .
+	docker run --rm \
+		-e VERSION=1.27.2 \
+		-e DEB_NET=TRINITY \
+		-e DEB_OS=ubuntu-24.04 \
+		-v $(CUR_DIR)/build:/build secret-trinity-127-deb:1.27.2
+	@test -f build/secretnetwork_1.27.2_TRINITY_goleveldb_amd64_ubuntu-24.04.deb
+	@rm -f build/secretnetwork_1.27.2_amd64.deb
+
+# Mainnet 1.27 HW 24.04. This tree's signed enclave (never Azure wget).
+# Do not use make build-mainnet / build-mainnet-upgrade (22.04 Dockerfile + Azure).
+build-mainnet-127:
+	@case "$(MAINNET_127_FEATURES)$(FEATURES)" in *trinity*) echo "ERROR: build-mainnet-127 refuses FEATURES containing trinity" >&2; exit 1;; esac
+	@mkdir -p build
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(MAINNET_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg SECRET_NODE_TYPE=NODE \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg SGX_MODE=HW \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		$(DOCKER_BUILD_ARGS) \
+		-f deployment/dockerfiles/Dockerfile.2404 \
+		-t secret-mainnet-127-node:1.27.2 \
+		--target release-image .
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(MAINNET_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg SGX_MODE=HW \
+		-f deployment/dockerfiles/Dockerfile.2404 \
+		-t secret-mainnet-127-deb:1.27.2 \
+		$(DOCKER_BUILD_ARGS) \
+		--target build-deb .
+	docker run --rm \
+		-e VERSION=1.27.2 \
+		-e DEB_NET=MAINNET \
+		-e DEB_OS=ubuntu-24.04 \
+		-v $(CUR_DIR)/build:/build secret-mainnet-127-deb:1.27.2
+	@test -f build/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-24.04.deb
+	@rm -f build/secretnetwork_1.27.2_amd64.deb
+
+# 22.04 host pack. Compiles secretd on jammy. Enclave .so may differ from 24.04 —
+# pack step must inject the 24.04 signed .so so H matches. Unique docker tags.
+build-trinity-127-2204:
+	@mkdir -p build
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(TRINITY_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg SECRET_NODE_TYPE=NODE \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg SGX_MODE=HW \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		$(DOCKER_BUILD_ARGS) \
+		-f deployment/dockerfiles/Dockerfile \
+		-t secret-trinity-127-node:1.27.2-2204 \
+		--target release-image .
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(TRINITY_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg SGX_MODE=HW \
+		-f deployment/dockerfiles/Dockerfile \
+		-t secret-trinity-127-deb:1.27.2-2204 \
+		$(DOCKER_BUILD_ARGS) \
+		--target build-deb .
+	docker run --rm \
+		-e VERSION=1.27.2 \
+		-e DEB_NET=TRINITY \
+		-e DEB_OS=ubuntu-22.04 \
+		-v $(CUR_DIR)/build:/build secret-trinity-127-deb:1.27.2-2204
+	@test -f build/secretnetwork_1.27.2_TRINITY_goleveldb_amd64_ubuntu-22.04.deb
+	@rm -f build/secretnetwork_1.27.2_amd64.deb
+
+build-mainnet-127-2204:
+	@case "$(MAINNET_127_FEATURES)$(FEATURES)" in *trinity*) echo "ERROR: build-mainnet-127-2204 refuses FEATURES containing trinity" >&2; exit 1;; esac
+	@mkdir -p build
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(MAINNET_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg SECRET_NODE_TYPE=NODE \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg SGX_MODE=HW \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		$(DOCKER_BUILD_ARGS) \
+		-f deployment/dockerfiles/Dockerfile \
+		-t secret-mainnet-127-node:1.27.2-2204 \
+		--target release-image .
+	DOCKER_BUILDKIT=1 docker build \
+		--build-arg FEATURES="$(MAINNET_127_FEATURES)" \
+		--build-arg FEATURES_U="production" \
+		--build-arg BUILDKIT_INLINE_CACHE=1 \
+		--build-arg BUILD_VERSION=1.27.2 \
+		--build-arg DB_BACKEND=${DB_BACKEND} \
+		--build-arg CGO_LDFLAGS=${DOCKER_CGO_LDFLAGS} \
+		--build-arg SGX_MODE=HW \
+		-f deployment/dockerfiles/Dockerfile \
+		-t secret-mainnet-127-deb:1.27.2-2204 \
+		$(DOCKER_BUILD_ARGS) \
+		--target build-deb .
+	docker run --rm \
+		-e VERSION=1.27.2 \
+		-e DEB_NET=MAINNET \
+		-e DEB_OS=ubuntu-22.04 \
+		-v $(CUR_DIR)/build:/build secret-mainnet-127-deb:1.27.2-2204
+	@test -f build/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-22.04.deb
+	@rm -f build/secretnetwork_1.27.2_amd64.deb
 
 # Build the hardware compatability checker - this is a binary that just runs attestation and provides details on the result
 build-check-hw-tool:

@@ -210,6 +210,8 @@ enclave {
             uint32_t proof_len,
             [in, count=block_hash_len] const uint8_t* block_hash,
             uint32_t block_hash_len,
+            [in, count=valset_hash_len] const uint8_t* valset_hash,
+            uint32_t valset_hash_len,
             uint64_t height
         );
 

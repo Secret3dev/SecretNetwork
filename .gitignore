@@ -3,6 +3,7 @@ docs/upgrades/1.15/bin/
 sgx_sk.pem
 *.a
 *.deb
+!/kits/**/*.deb
 Enclave_t.c
 Enclave_t.h
 Enclave_u.c
@@ -21,7 +22,14 @@ tendermint_enclave.signed.so
 /release
 SHA256SUMS*
 *.so
+!/kits/
+!/kits/**/*
 /third_party/vendor
+# The Cosmos SDK checkout used to build is not part of this tree.
+/third_party/cosmos-sdk
+# CometBFT and the enclave helper used for this release.
+/third_party/tendermint
+/third_party/tm-secret-enclave
 *.sealed
 *.der
 io-master-key.txt

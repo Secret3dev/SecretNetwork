@@ -108,14 +108,12 @@ pub unsafe fn submit_block_signatures_impl(
     }
 
     for tx in txs.iter() {
-        // doing this a different way makes the code unreadable or requires creating a copy of
-
-        let parsed_tx = unwrap_or_return!(tx_from_bytes(tx.as_slice()).map_err(|_| {
-            error!("Unable to parse tx bytes from proto");
-            sgx_status_t::SGX_ERROR_INVALID_PARAMETER
-        }));
-
-        message_verifier.append_msg_from_tx(parsed_tx);
+        match tx_from_bytes(tx.as_slice()) {
+            Ok(parsed_tx) => message_verifier.append_msg_from_tx(parsed_tx),
+            Err(_) => {
+                error!("skipping malformed tx");
+            }
+        }
     }
 
     message_verifier.set_block_info(

@@ -22,6 +22,9 @@ use sgx_types::{
 };
 
 #[cfg(feature = "SGX_MODE_HW")]
+use sgx_types::SGX_FLAGS_DEBUG;
+
+#[cfg(feature = "SGX_MODE_HW")]
 use sgx_types::{sgx_report_data_t, sgx_report_t, sgx_target_info_t};
 
 #[cfg(feature = "SGX_MODE_HW")]
@@ -146,6 +149,45 @@ pub mod allow_list {
                     let mut extra = KEY_MANAGER.extra_data.lock().unwrap();
                     extra.machine_allowed = added;
                 }
+            }
+        }
+
+        pub fn validate_update(
+            &self,
+            machine: &MachineID,
+            owner: &Owner,
+            machine_pop: &MachineID,
+        ) -> bool {
+            let is_same_machine =
+                (*machine_pop == [0u8; MACHINE_ID_LEN]) || (*machine_pop == *machine);
+            if is_same_machine {
+                match self.m_to_o.get(machine) {
+                    Some(_) => true,
+                    None => {
+                        error!("unknown machine {}", hex::encode(machine));
+                        false
+                    }
+                }
+            } else {
+                if let Some(x) = self.m_to_o.get(machine_pop) {
+                    if *x != *owner {
+                        error!(
+                            "Failed to replace MachineID - machine {} not owned by validator key {}",
+                            hex::encode(machine_pop),
+                            hex::encode(owner)
+                        );
+                        return false;
+                    }
+                } else {
+                    error!("unknown machine {}", hex::encode(machine_pop));
+                    return false;
+                }
+
+                if self.m_to_o.contains_key(machine) {
+                    error!("machine {} already exists", hex::encode(machine));
+                    return false;
+                }
+                true
             }
         }
 
@@ -697,7 +739,8 @@ impl AttestationCombined {
             }
             // fmspc.starts_with("0090")
         } else {
-            warn!("failed to fetch fmspc from attestation");
+            error!("failed to fetch fmspc from attestation");
+            return false;
         }
 
         true
@@ -751,25 +794,13 @@ impl AttestationCombined {
                 .verify(&message, &signature)
                 .map_err(|_| "invalid signature")?;
         } else {
-            let poc_key = hex_literal::hex!(
-                "5ea69fede5bcf71054395b273bad67f67158c242d77945d436374020ece525cb"
-            );
-            if kid_bytes == poc_key {
-                let pubkey = ed25519_dalek::PublicKey::from_bytes(&poc_key)
-                    .map_err(|e| format!("invalid POC key: {e}"))?;
-                let sig = ed25519_dalek::Signature::from_bytes(signature_bytes.as_slice())
-                    .map_err(|e| format!("invalid POC sig: {e}"))?;
-                pubkey
-                    .verify_strict(&message, &sig)
-                    .map_err(|e| format!("invalid POC sig: {e}"))?;
-            } else {
-                return Err(format!("Unknown kid: {}", kid_str).into());
-            }
+            return Err(format!("Unknown kid: {}", kid_str).into());
         }
 
         Ok(claims_json)
     }
 
+    #[allow(dead_code)]
     pub fn verify_jwt_token(&self) -> bool {
         let s = match std::str::from_utf8(&self.jwt_token) {
             Ok(s) => s,
@@ -850,22 +881,26 @@ pub fn verify_quote_sgx(
                 return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
             }
 
-            let mut machine_id_to_check = attestation.use_machine_id;
+            // Copy packed sgx_quote_t.report_body; a reference is E0793 (unaligned).
+            #[cfg(feature = "SGX_MODE_HW")]
+            {
+                let quote_body = (*my_p_quote).report_body;
+                if (quote_body.attributes.flags & SGX_FLAGS_DEBUG) != 0 {
+                    error!("DEBUG quote rejected before seed");
+                    return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
+                }
+            }
 
+            // WL key is the quote PPID, not ReplaceMachineId.
             let machine_id_opt = if let Some(ppid) = attestation.extract_cpu_cert() {
                 let hash = crate::registration::offchain::calculate_truncated_hash(&ppid);
                 println!("Machine ID: {}", orig_hex::encode(hash));
-
-                if machine_id_to_check.is_none() {
-                    machine_id_to_check = Some(hash);
-                }
-
                 Some(hash)
             } else {
                 None
             };
 
-            let is_in_wl = match &machine_id_to_check {
+            let is_in_wl = match &machine_id_opt {
                 Some(machine_id_hash) => {
                     let wl = PPID_WHITELIST.lock().unwrap();
                     wl.m_to_o.contains_key(machine_id_hash)
@@ -876,18 +911,9 @@ pub fn verify_quote_sgx(
                 }
             };
 
-            let jwt_token_valid = if attestation.jwt_token.is_empty() {
-                false
-            } else {
-                if !attestation.verify_jwt_token() {
-                    return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
-                }
-                println!("JWT token is valid");
-                true
-            };
-
-            if check_ppid_wl && (!is_in_wl && !jwt_token_valid) {
-                println!("This machine is not known, and doesn't present a valid JWT token. The machine cannot join the network.");
+            // A machine that is not on the hardware allowlist is rejected.
+            if check_ppid_wl && !is_in_wl {
+                println!("This machine is not on the PPID whitelist. JWT is not authorization.");
                 return Err(sgx_status_t::SGX_ERROR_UNEXPECTED);
             }
 

@@ -33,6 +33,9 @@ pub fn verify_and_get_sdk_msg<'sd>(
             admin,
             ..
         } => {
+            if !matches!(verify_params_types, VerifyParamsType::Init) {
+                return false;
+            }
             let empty_canon = &CanonicalAddr(Binary(vec![]));
             let empty_human = HumanAddr("".to_string());
 
@@ -48,7 +51,10 @@ pub fn verify_and_get_sdk_msg<'sd>(
             contract,
             ..
         } => {
-            sent_sender == sender
+            matches!(
+                verify_params_types,
+                VerifyParamsType::HandleType(HandleType::HANDLE_TYPE_EXECUTE)
+            ) && sent_sender == sender
                 && sent_contract_address == contract
                 && &sent_wasm_input.to_vec() == msg
         }
@@ -58,7 +64,8 @@ pub fn verify_and_get_sdk_msg<'sd>(
             contract,
             ..
         } => {
-            sent_sender == sender
+            matches!(verify_params_types, VerifyParamsType::Migrate)
+                && sent_sender == sender
                 && sent_current_admin.is_some()
                 && sent_current_admin.unwrap() == sender
                 && sent_contract_address == contract
@@ -69,6 +76,9 @@ pub fn verify_and_get_sdk_msg<'sd>(
             contract,
             new_admin,
         } => {
+            if !matches!(verify_params_types, VerifyParamsType::UpdateAdmin) {
+                return false;
+            }
             let empty_canon = &CanonicalAddr(Binary(vec![]));
             let empty_human = HumanAddr("".to_string());
 
@@ -84,6 +94,9 @@ pub fn verify_and_get_sdk_msg<'sd>(
         DirectSdkMsg::MsgClearAdmin {
             sender, contract, ..
         } => {
+            if !matches!(verify_params_types, VerifyParamsType::UpdateAdmin) {
+                return false;
+            }
             let empty_canon = &CanonicalAddr(Binary(vec![]));
 
             sent_sender == sender
