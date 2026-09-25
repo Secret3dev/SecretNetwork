@@ -63,6 +63,20 @@ If the unit has `--home /home/secret`, set `SECRETD_HOME=/home/secret`.
 
 The unit name is `secret-node`. Set `SERVICE` if the name is different.
 
+### After the network has restarted
+
+`autopilot.sh` runs only while `secret-4-v1.27.2` is the current upgrade. Once the collector marks it `done`, `autopilot.sh install` exits and the combined file endpoint answers 410. A node that is still on `1.26.0` after the chain is producing blocks on `1.27.2` uses `post-launch.sh` instead of `autopilot.sh`.
+
+The combined file is frozen by then, so `post-launch.sh` carries it rather than fetching it. That is the only difference. It writes the same file to the same place, then runs the same handover through `halt.sh`.
+
+```bash
+cd mainnet && I_UNDERSTAND=yes I_CONFIRM_PRECHECK=yes ./post-launch.sh install
+```
+
+The node must be running `1.26.0` and must have halted on plan `v1.27.2`, the same as `autopilot.sh install`. `SECRETD_HOME`, `SERVICE_UNIT_FILE` and `SCRT_SGX_STORAGE` are read by `halt.sh` and work the same way.
+
+`SERVICE` is picked by the script and not read from the environment. `cosmovisor` is stopped and disabled when that unit exists, because it restarts the node on its own and would fight the handover. Then `secret-node` is used when that unit exists, and `cosmovisor` otherwise. A node whose unit has some other name stops with `no secret-node or cosmovisor unit`. Set `SERVICE` and run `./halt.sh --install` directly, after writing `migration_consensus.json` yourself.
+
 ### By hand
 
 Doing this by hand takes longer. Emergency signers who still need to coordinate signatures should use `./autopilot.sh sign` and the install command above. Each block is a subshell. A failure stops that block and leaves the SSH session open.
@@ -83,6 +97,7 @@ fetch mainnet/SUBMIT.md
 fetch mainnet/proposal.json
 fetch mainnet/autopilot.sh
 fetch mainnet/halt.sh
+fetch mainnet/post-launch.sh
 fetch mainnet/catalog/after.txt
 fetch mainnet/catalog/allowlist.txt
 fetch mainnet/catalog/meta.json
@@ -93,7 +108,7 @@ fetch mainnet/ubuntu-24.04/secretnetwork_1.27.2_MAINNET_goleveldb_amd64_ubuntu-2
 fetch testnet/H.txt
 fetch testnet/halt.sh
 fetch testnet/install.sh
-chmod +x "$kit/mainnet/autopilot.sh" "$kit/mainnet/halt.sh" "$kit/mainnet/check-hw/check-hw" "$kit/testnet/halt.sh" "$kit/testnet/install.sh"
+chmod +x "$kit/mainnet/autopilot.sh" "$kit/mainnet/halt.sh" "$kit/mainnet/post-launch.sh" "$kit/mainnet/check-hw/check-hw" "$kit/testnet/halt.sh" "$kit/testnet/install.sh"
 ( cd "$kit" && set -o pipefail && grep '  mainnet/' SHA256SUMS | sha256sum -c - )
 )
 ```
@@ -175,6 +190,6 @@ sudo systemctl start secret-node
 )
 ```
 
-The collector marks one upgrade `current` per network, by hand. `autopilot.sh` runs only when `secret-4-v1.27.2` is that current upgrade and the measurement matches this package. After the upgrade is marked `done`, the script exits and the collector stops serving the combined file. `testnet/halt.sh` exits the same way once `trinity-b-v1.27.0-r10` is marked done.
+The collector marks one upgrade `current` per network, by hand. `autopilot.sh` runs only when `secret-4-v1.27.2` is that current upgrade and the measurement matches this package. After the upgrade is marked `done`, the script exits and the collector stops serving the combined file. Use `mainnet/post-launch.sh` from then on; it carries the frozen combined file. `testnet/halt.sh` exits the same way once `trinity-b-v1.27.0-r10` is marked done.
 
 Proposal 377 is submitted. Plan `v1.27.2` at height `27286266`.
