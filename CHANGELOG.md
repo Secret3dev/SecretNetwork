@@ -1,5 +1,10 @@
 # CHANGELOG
 
+# Unreleased
+
+- `MsgUpdateMachineWhitelist` unpacks the passed proposal's message as `sdk.Msg`. Since 1.27.2 it failed for every proposal with `no registered implementations of type types.MsgUpdateMachineWhitelistProposal`.
+- A whitelist proposal can be applied once. A replay is rejected instead of appending another machine entry.
+
 # 1.27.2
 
 - Empty upgrade handler for a later halt on a chain that already applied v1.27.1.

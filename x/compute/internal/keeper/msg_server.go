@@ -356,6 +356,14 @@ func (m msgServer) UpdateMachineWhitelist(goCtx context.Context, msg *types.MsgU
 		return nil, err
 	}
 
+	applied, err := m.keeper.IsMachineWhitelistApplied(ctx, msg.ProposalId)
+	if err != nil {
+		return nil, err
+	}
+	if applied {
+		return nil, sdkerrors.ErrInvalidRequest.Wrapf("proposal with id %d already applied", msg.ProposalId)
+	}
+
 	ctx.EventManager().EmitEvent(sdk.NewEvent(
 		types.EventTypeMachineWhitelistUpdate,
 		sdk.NewAttribute("proposal_id", fmt.Sprintf("%d", msg.ProposalId)),
@@ -372,6 +380,9 @@ func (m msgServer) UpdateMachineWhitelist(goCtx context.Context, msg *types.MsgU
 		_ = m.keeper.RegKeeper.OnNewMachine(ctx, id)
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := m.keeper.SetMachineWhitelistApplied(ctx, msg.ProposalId); err != nil {
 		return nil, err
 	}
 

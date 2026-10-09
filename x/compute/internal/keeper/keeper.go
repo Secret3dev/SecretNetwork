@@ -2248,6 +2248,16 @@ func (k Keeper) ConsumeAdminUpdate(ctx sdk.Context, contractAddr string) {
 	}
 }
 
+// IsMachineWhitelistApplied reports whether a whitelist proposal has already been applied
+func (k Keeper) IsMachineWhitelistApplied(ctx sdk.Context, proposalID uint64) (bool, error) {
+	return k.storeService.OpenKVStore(ctx).Has(types.GetMachineWhitelistAppliedKey(proposalID))
+}
+
+// SetMachineWhitelistApplied marks a whitelist proposal as applied so it cannot be replayed
+func (k Keeper) SetMachineWhitelistApplied(ctx sdk.Context, proposalID uint64) error {
+	return k.storeService.OpenKVStore(ctx).Set(types.GetMachineWhitelistAppliedKey(proposalID), []byte{1})
+}
+
 // UpdateContractGovernanceRequirement set true to the require_governance field
 func (k Keeper) SetContractGovernanceRequirement(ctx sdk.Context, contractAddr sdk.AccAddress) error {
 	contractInfo := k.GetContractInfo(ctx, contractAddr)

@@ -36,6 +36,7 @@ var (
 	ParamsKey                                      = []byte{0x0B}
 	UpgradeAuthPrefix                              = []byte{0x0C}
 	UpdateAdminPrefix                              = []byte{0x0D}
+	MachineWhitelistAppliedPrefix                  = []byte{0x0E}
 	RandomPrefix                                   = []byte{0xFF}
 	ValidatorSetEvidencePrefix                     = []byte{0xFE}
 	MachineIDEvidencePrefix                        = []byte{0xFD}
@@ -51,6 +52,11 @@ func GetUpdateAdminKey(contractAddr string) []byte {
 // GetUpgradeAuthKey creates the key for upgrade authorization storage
 func GetUpgradeAuthKey(contractAddr string) []byte {
 	return append(UpgradeAuthPrefix, []byte(contractAddr)...)
+}
+
+// GetMachineWhitelistAppliedKey creates the key marking a whitelist proposal as applied
+func GetMachineWhitelistAppliedKey(proposalID uint64) []byte {
+	return append(MachineWhitelistAppliedPrefix, sdk.Uint64ToBigEndian(proposalID)...)
 }
 
 // GetCodeKey constructs the key for retreiving the ID for the WASM code
