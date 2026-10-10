@@ -310,7 +310,7 @@ func (c PrivilegedChecker) checkUpdateMachineWhitelist(ctx sdk.Context, msg *typ
 		return sdkerrors.ErrInvalidRequest.Wrapf("proposal with id %d is not of type MsgUpdateMachineWhitelistProposal", msg.ProposalId)
 	}
 	var proposalMsg types.MsgUpdateMachineWhitelistProposal
-	if err = c.cdc.UnpackAny(proposal.Messages[0], &proposalMsg); err != nil {
+	if err = proposalMsg.Unmarshal(proposal.Messages[0].Value); err != nil {
 		return err
 	}
 	if msg.MachineId != proposalMsg.MachineId {

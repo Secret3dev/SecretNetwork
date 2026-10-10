@@ -178,3 +178,24 @@ func TestGovEndBlockSoftwareUpgradeTightness(t *testing.T) {
 	err = c.CheckGovEndBlockMessages(sdk.Context{}, []*codectypes.Any{up})
 	require.ErrorIs(t, err, types.ErrUpgradeProposalPassedDenied)
 }
+
+func TestMachineWhitelistProposalValueUnpackFailsUnmarshalWorks(t *testing.T) {
+	enc := keeper.MakeEncodingConfig()
+	msg := &types.MsgUpdateMachineWhitelistProposal{
+		Authority:   "secret10d07y265gmmuvt4z0w9aw880jnsr700jc88vt0",
+		Title:       "machine",
+		Description: "machine",
+		MachineId:   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}
+	packed, err := codectypes.NewAnyWithValue(msg)
+	require.NoError(t, err)
+
+	var asValue types.MsgUpdateMachineWhitelistProposal
+	err = enc.Codec.UnpackAny(packed, &asValue)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no registered implementations of type types.MsgUpdateMachineWhitelistProposal")
+
+	var decoded types.MsgUpdateMachineWhitelistProposal
+	require.NoError(t, decoded.Unmarshal(packed.Value))
+	require.Equal(t, msg.MachineId, decoded.MachineId)
+}

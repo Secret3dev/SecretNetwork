@@ -4,10 +4,14 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -39,6 +43,10 @@ const (
 	flagLegacyRegistrationNode = "registration-node"
 	flagLegacyBootstrapNode    = "node"
 )
+
+const mainnetRegistrationService = "https://auto.secret3.dev/api/registernode"
+
+const signedEnclaveFile = "librust_cosmwasm_enclave.signed.so"
 
 type PrivValidatorKey struct {
 	PrivKey struct {
@@ -589,20 +597,228 @@ type ErrorResponse struct {
 	Details string `json:"details"`
 }
 
-// AutoRegisterNode *** EXPERIMENTAL ***
+func signedEnclavePath() (string, error) {
+	dir := os.Getenv("SCRT_ENCLAVE_DIR")
+	if dir == "" {
+		dir = "."
+	}
+	candidates := []string{
+		filepath.Join(dir, signedEnclaveFile),
+		filepath.Join("/lib", signedEnclaveFile),
+		filepath.Join("/usr/lib", signedEnclaveFile),
+		filepath.Join("/usr/local/lib", signedEnclaveFile),
+	}
+	seen := map[string]struct{}{}
+	for _, path := range candidates {
+		if _, ok := seen[path]; ok {
+			continue
+		}
+		seen[path] = struct{}{}
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path, nil
+		}
+	}
+	return "", fmt.Errorf("cannot find %s", signedEnclaveFile)
+}
+
+func enclaveMeasurement(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	hdr := []byte{
+		0x06, 0x00, 0x00, 0x00,
+		0xe1, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x01, 0x00,
+		0x00, 0x00, 0x00, 0x00,
+	}
+	i := bytes.Index(data, hdr)
+	if i < 0 || i+992 > len(data) {
+		return "", fmt.Errorf("enclave measurement not found in %s", path)
+	}
+	return hex.EncodeToString(data[i+960 : i+992]), nil
+}
+
+func currentSealPath() (string, error) {
+	enclavePath, err := signedEnclavePath()
+	if err != nil {
+		return "", err
+	}
+	measurement, err := enclaveMeasurement(enclavePath)
+	if err != nil {
+		return "", err
+	}
+	dir := os.Getenv("SCRT_SGX_STORAGE")
+	if dir == "" {
+		dir = "/opt/secret/.sgx_secrets"
+	}
+	return filepath.Join(dir, "data-"+measurement+".bin"), nil
+}
+
+func rejectPulsar(cmd *cobra.Command) error {
+	pulsar, err := cmd.Flags().GetBool(flagPulsar)
+	if err != nil {
+		return fmt.Errorf("error with testnet flag: %s", err)
+	}
+	if pulsar {
+		return fmt.Errorf("auto-register --pulsar is not available")
+	}
+	return nil
+}
+
+func registrationServiceURL(cmd *cobra.Command) (string, error) {
+	if err := rejectPulsar(cmd); err != nil {
+		return "", err
+	}
+	custom, err := cmd.Flags().GetString(flagCustomRegistrationService)
+	if err != nil {
+		return "", err
+	}
+	if custom != "" {
+		log.Println("Registering node with custom registration service")
+		return custom, nil
+	}
+	log.Println("Registering node on mainnet")
+	return mainnetRegistrationService, nil
+}
+
 func AutoRegisterNode() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "auto-register",
-		Short: "Perform remote attestation of the enclave",
-		Long: `Coming soon. Register with tx register auth.
-`,
-		Args: cobra.ExactArgs(0),
+		Short: "Register this node with the registration service",
+		Long:  "Create an attestation and send it to the registration service. The service submits the register transaction.",
+		Args:  cobra.ExactArgs(0),
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return fmt.Errorf("auto-register is not available yet; register with tx register auth")
+			if err := rejectPulsar(cmd); err != nil {
+				return err
+			}
+
+			sealPath, err := currentSealPath()
+			if err != nil {
+				return err
+			}
+			sgxSecretsFolder := filepath.Dir(sealPath)
+			sgxAttestationCombined := filepath.Join(sgxSecretsFolder, reg.AttestationCombinedPath)
+
+			resetFlag, err := cmd.Flags().GetBool(flagReset)
+			if err != nil {
+				return fmt.Errorf("error with reset flag: %s", err)
+			}
+
+			if !resetFlag {
+				if _, err := os.Stat(sealPath); os.IsNotExist(err) {
+					fmt.Println("Creating new enclave registration key")
+					if _, err := api.KeyGen(); err != nil {
+						return fmt.Errorf("failed to initialize enclave: %w", err)
+					}
+				} else if err != nil {
+					return err
+				} else {
+					fmt.Println("Enclave key already exists. If you wish to overwrite and reset the node, use the --reset flag")
+					return nil
+				}
+			} else {
+				fmt.Println("Reset enclave flag set, generating new enclave registration key. You must now re-register the node")
+				_ = os.Remove(sgxAttestationCombined)
+				if _, err := api.KeyGen(); err != nil {
+					return fmt.Errorf("failed to initialize enclave: %w", err)
+				}
+			}
+
+			if err = CreateAttestationReportEx(cmd, false); err != nil {
+				return fmt.Errorf("failed to create attestation report: %w", err)
+			}
+
+			certCombined, err := os.ReadFile(sgxAttestationCombined)
+			if err != nil {
+				_ = os.Remove(sgxAttestationCombined)
+				return err
+			}
+
+			if _, err = ra.VerifyCombinedCert(certCombined); err != nil {
+				return err
+			}
+
+			regURL, err := registrationServiceURL(cmd)
+			if err != nil {
+				return err
+			}
+
+			payload := []byte(fmt.Sprintf(`{
+"certificate": "%s"
+}`, base64.StdEncoding.EncodeToString(certCombined)))
+
+			resp, err := http.Post(regURL, "application/json", bytes.NewBuffer(payload))
+			if err != nil {
+				log.Fatalln(err)
+			}
+			defer resp.Body.Close()
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				errDetails := ErrorResponse{}
+				if err := json.Unmarshal(body, &errDetails); err != nil {
+					return fmt.Errorf("registration TX was not successful - %s", err)
+				}
+				return fmt.Errorf("registration TX was not successful - %s", errDetails.Details)
+			}
+
+			details := OkayResponse{}
+			if err = json.Unmarshal(body, &details); err != nil {
+				return fmt.Errorf("error getting seed from registration service - %s", err)
+			}
+
+			seed := details.Details.Value
+			log.Printf("seed: %s\n", seed)
+			if len(seed) > 2 {
+				seed = seed[2:]
+			}
+			if (len(seed)%reg.EncryptedKeyGranularity != 0) || !reg.IsHexString(seed) {
+				return fmt.Errorf("invalid encrypted seed format (requires hex string of length 148 without 0x prefix)")
+			}
+
+			cfg := reg.SeedConfig{
+				EncryptedKey: seed,
+				MasterKey:    details.RegistrationKey,
+				Version:      reg.SeedConfigVersion,
+			}
+			cfgBytes, err := json.Marshal(&cfg)
+			if err != nil {
+				return err
+			}
+
+			homeDir, err := cmd.Flags().GetString(flags.FlagHome)
+			if err != nil {
+				return err
+			}
+			seedCfgDir := filepath.Join(homeDir, reg.SecretNodeCfgFolder)
+			seedCfgFile := filepath.Join(seedCfgDir, reg.SecretNodeSeedNewConfig)
+			if _, err = os.Stat(seedCfgDir); os.IsNotExist(err) {
+				if err = os.MkdirAll(seedCfgDir, 0o777); err != nil {
+					return fmt.Errorf("failed to create directory '%s': %w", seedCfgDir, err)
+				}
+			}
+
+			if _, err = os.Stat(seedCfgFile); !os.IsNotExist(err) {
+				if err = os.Remove(seedCfgFile); err != nil {
+					return fmt.Errorf("failed to modify file '%s': %w", seedCfgFile, err)
+				}
+			}
+			if err = os.WriteFile(seedCfgFile, cfgBytes, 0o600); err != nil {
+				return fmt.Errorf("failed to create file '%s': %w", seedCfgFile, err)
+			}
+
+			fmt.Println("Done registering! Ready to start...")
+			return nil
 		},
 	}
 	cmd.Flags().Bool(flagReset, false, "Optional flag to regenerate the enclave registration key")
-	cmd.Flags().Bool(flagPulsar, false, "Set --pulsar flag if registering with the Pulsar testnet")
+	cmd.Flags().Bool(flagPulsar, false, "Not available")
 	cmd.Flags().String(flagCustomRegistrationService, "", "Use this flag if you wish to specify a custom registration service")
 	cmd.Flags().String(flagLegacyBootstrapNode, "", "DEPRECATED: This flag is no longer required or in use")
 	cmd.Flags().String(flagLegacyRegistrationNode, "", "DEPRECATED: This flag is no longer required or in use")

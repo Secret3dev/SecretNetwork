@@ -93,13 +93,20 @@ func InitCmd(mbm module.BasicManager, defaultNodeHome string) *cobra.Command {
 
 			// only for mainnet
 			if chainID == "secret-4" {
-				seeds := []string{
-					"6fb7169f7630da9468bf7cc0bcbbed1eb9ed0d7b@scrt-seed-01.scrtlabs.com:26656", // SCRT Labs 1
-					"ab6394e953e0b570bb1deeb5a8b387aa0dc6188a@scrt-seed-02.scrtlabs.com:26656", // SCRT Labs 2
-					"9cdaa5856e0245ecd73bd464308fb990fbc53b57@scrt-seed-03.scrtlabs.com:26656", // SCRT Labs 3
-				}
-				// Override default settings in config.toml
-				config.P2P.Seeds = strings.Join(seeds, ",")
+				config.P2P.Seeds = ""
+				config.P2P.PersistentPeers = strings.Join([]string{
+					"9c530e33a6737efb14c5dc4c087188815375ed5f@162.251.234.143:26656",
+					"d047c7c0431e13ef914a928f4d738870c3de932d@162.251.234.169:26656",
+				}, ",")
+			}
+			// only for trinity-b
+			if chainID == "trinity-b" {
+				config.P2P.Seeds = ""
+				config.P2P.PersistentPeers = strings.Join([]string{
+					"82b44b89a0d0f35df75a99463ba1c7235c519757@162.251.234.138:26656",
+					"3ef6b2e2a9e4c6d482e1e848d07f11f8e178c1f2@162.251.234.139:26656",
+					"3ef7feafb5d56e8027a230e3ebaa753703c27aeb@162.251.234.140:26656",
+				}, ",")
 			}
 
 			config.P2P.MaxNumInboundPeers = 320
